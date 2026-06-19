@@ -1070,21 +1070,18 @@ fn modal_child_config_value(spec: &ModalSpec, variant_name: &str, value: Value) 
         return None;
     };
 
-    if let Some(value) = map.remove(variant_name) {
-        return Some(value);
-    }
+    let selected = spec
+        .variants
+        .iter()
+        .find(|variant| normalize_key(variant.name) == normalize_key(variant_name));
 
-    for variant in spec.variants {
+    if let Some(variant) = selected {
         if let Some(value) = map.remove(variant.name) {
-            if normalize_key(variant.name) == normalize_key(variant_name) {
-                return Some(value);
-            }
+            return Some(value);
         }
         for alias in variant.aliases {
             if let Some(value) = map.remove(*alias) {
-                if normalize_key(alias) == normalize_key(variant_name) {
-                    return Some(value);
-                }
+                return Some(value);
             }
         }
     }

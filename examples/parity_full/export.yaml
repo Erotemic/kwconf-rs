@@ -1,0 +1,5 @@
+checkpoint: runs/debug/checkpoint.pt
+output: exported/debug.onnx
+format: onnx
+opset: 17
+simplify: true

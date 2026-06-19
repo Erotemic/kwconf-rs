@@ -1,0 +1,10 @@
+checkpoint: runs/debug/checkpoint.pt
+threshold: 0.72
+report: true
+metrics: [accuracy, f1]
+
+dataset:
+  root: data/eval-images
+  split: val
+  channels: [red, green, blue]
+  cache: false

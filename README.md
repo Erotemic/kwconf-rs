@@ -102,6 +102,31 @@ struct TrainConfig {
 ```
 
 
+
+## Full side-by-side parity demo
+
+For a larger demo with modal commands, nested subconfigs, aliases, choices,
+flags, csv/yaml parsers, shared YAML files, colored help, and Rust completion
+scripts, see [`docs/side-by-side-parity-demo.md`](docs/side-by-side-parity-demo.md).
+
+Quick comparison:
+
+```bash
+python examples/parity_full/kwconf_app.py train \
+    --config examples/parity_full/train.yaml \
+    --optimizer.lr=0.02 \
+    --logging.tags=cli,side \
+    --logging.metadata='{owner: cli, priority: 2}' \
+    --dry-run
+
+cargo run -p kwconf --example kwconf_rs_full_app -- train \
+    --config examples/parity_full/train.yaml \
+    --optimizer.lr=0.02 \
+    --logging.tags=cli,side \
+    --logging.metadata='{owner: cli, priority: 2}' \
+    --dry-run
+```
+
 ## Nested subconfigs
 
 Use `#[kwconf(subconfig)]` for a field that is another `kwconf::Config`.

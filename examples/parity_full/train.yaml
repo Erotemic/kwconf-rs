@@ -1,0 +1,22 @@
+profile: debug
+dry_run: false
+
+dataset:
+  root: data/train-images
+  split: train
+  channels: [red, green, blue]
+  cache: true
+
+model:
+  arch: resnet
+  depth: 50
+  pretrained: true
+
+optimizer:
+  lr: 0.005
+  weight_decay: 0.0001
+  scheduler: cosine
+
+logging:
+  level: INFO
+  tags: [file, parity]

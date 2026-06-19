@@ -98,14 +98,21 @@ Use `try_cli()` or `from_iter(...)` in tests.
 
 Python kwconf can use `rich_argparse` when it is installed.
 
-Rust kwconf-rs uses `clap` color policy:
+Rust kwconf-rs uses `clap` help rendering with an explicit style palette:
 
 ```rust
 let help = TrainConfig::help_with_color(kwconf::ColorChoice::Auto);
 ```
 
-`TrainConfig::cli()` uses the default help path. Tests can use `Never` for stable
-snapshots.
+The CLI also accepts:
+
+```bash
+train --color always --help
+train --color never --help
+```
+
+`TrainConfig::cli()` uses `auto` by default. Tests can use `Never` for stable
+snapshots or `Always` to assert ANSI output.
 
 ## Completion
 

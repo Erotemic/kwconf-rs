@@ -69,4 +69,5 @@ fn help_is_available() {
     let help = DemoConfig::help();
     assert!(help.contains("--width"));
     assert!(help.contains("--config"));
+    assert!(help.contains("--color"));
 }

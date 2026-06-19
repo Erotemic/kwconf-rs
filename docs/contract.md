@@ -55,7 +55,7 @@ Argv accepts long options:
 
 Boolean flags without an explicit value receive `true`.
 
-`--config`, `--help`, and `--generate-completion` are reserved by the runtime.
+`--config`, `--help`, `--color`, and `--generate-completion` are reserved by the runtime.
 
 ## Parsers
 
@@ -106,6 +106,7 @@ mode: String,
 `kwconf-rs` builds help and completion metadata from the same field spec.
 
 - `Config::help()` renders normal help.
+- `--color auto|always|never` controls color for CLI help.
 - `Config::help_with_color(...)` renders help with an explicit color policy.
 - `--generate-completion SHELL` prints a completion script.
 - `Config::completion_script(...)` returns the script as a string.

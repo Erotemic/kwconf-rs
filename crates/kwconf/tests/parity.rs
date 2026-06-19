@@ -76,6 +76,7 @@ fn env_sits_between_config_and_argv() {
 fn generated_help_and_completion_cover_demo_fields() {
     let help = TrainConfig::help_with_color(kwconf::ColorChoice::Never);
     assert!(help.contains("--generate-completion"));
+    assert!(help.contains("--color"));
     assert!(help.contains("--lr"));
     assert!(help.contains("--tags"));
 
@@ -83,6 +84,26 @@ fn generated_help_and_completion_cover_demo_fields() {
     assert!(bash.contains("--lr"));
     assert!(bash.contains("--tags"));
     assert!(bash.contains("--generate-completion"));
+    assert!(bash.contains("--color"));
+}
+
+#[test]
+fn forced_color_help_contains_ansi_styles() {
+    let help = TrainConfig::help_with_color(kwconf::ColorChoice::Always);
+    assert!(help.contains("\x1b["), "forced color help should contain ANSI escapes: {help:?}");
+    assert!(help.contains("--lr"));
+
+    let err = TrainConfig::from_iter(["train", "--color", "always", "--help"]).unwrap_err();
+    let text = err.to_string();
+    assert!(text.contains("\x1b["), "--color always --help should contain ANSI escapes: {text:?}");
+    assert!(text.contains("--tags"));
+}
+
+#[test]
+fn color_never_help_is_plain_text() {
+    let help = TrainConfig::help_with_color(kwconf::ColorChoice::Never);
+    assert!(!help.contains("\x1b["));
+    assert!(help.contains("--color"));
 }
 
 #[test]

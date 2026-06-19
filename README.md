@@ -43,6 +43,7 @@ Run the bundled examples:
 
 ```bash
 cargo run -p kwconf --example basic -- --help
+cargo run -p kwconf --example basic -- --color always --help
 cargo run -p kwconf --example basic -- --config examples/basic.toml --lr=0.01 --tags=red,blue
 TRAIN_TAGS=nightly,smoke cargo run -p kwconf --example basic -- --mode=safe
 cargo run -p kwconf --example kwconf_rs_train -- --config examples/parity/train.toml --lr=0.01 --tags=argv,override
@@ -118,17 +119,21 @@ into the target struct.
 defaults < config file < env < argv
 ```
 
-The `--config PATH` flag is reserved by the runtime. Config files may be TOML,
-JSON, YAML, or YML.
+The `--config PATH`, `--color WHEN`, and `--generate-completion SHELL` flags are
+reserved by the runtime. Config files may be TOML, JSON, YAML, or YML.
 
 ## Colored help and completions
 
 `kwconf-rs` uses Rust-native CLI tooling for optional polish.
 
-- Help rendering is backed by `clap`, including its color policy.
+- Help rendering is backed by `clap` with a Cargo-like style palette.
+- `--color auto|always|never` controls color for help output.
 - `Config::help_with_color(...)` lets callers choose `Auto`, `Always`, or `Never`.
 - `--generate-completion SHELL` emits a completion script.
 - `Config::completion_script(...)` exposes the same behavior to build scripts or tests.
+
+Use `--color always --help` to force ANSI color through terminals, logs, or test
+harnesses that do not look like a TTY.
 
 Supported completion shells are `bash`, `elvish`, `fish`, `powershell`, and `zsh`.
 

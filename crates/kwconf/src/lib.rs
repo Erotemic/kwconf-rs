@@ -9,6 +9,7 @@
 //! Parsers apply to string-only sources: argv and env.
 
 use clap::{Arg, ArgAction, Command};
+use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap_complete::aot::{generate, Shell};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -56,7 +57,18 @@ pub trait Config: Default + Serialize + DeserializeOwned + Sized {
     fn cli() -> Self {
         match Self::try_cli() {
             Ok(cfg) => cfg,
-            Err(Error::HelpRequested(help)) | Err(Error::CompletionRequested(help)) => {
+            Err(Error::HelpRequested { text, color }) => {
+                if matches!(color, ColorChoice::Auto) {
+                    if let Err(err) = print_help_to_stdout(Self::config_spec(), color) {
+                        eprintln!("failed to print help: {err}");
+                        println!("{text}");
+                    }
+                } else {
+                    println!("{text}");
+                }
+                std::process::exit(0);
+            }
+            Err(Error::CompletionRequested(help)) => {
                 println!("{help}");
                 std::process::exit(0);
             }
@@ -206,7 +218,7 @@ impl Default for Sources {
 /// Errors returned by kwconf-rs.
 #[derive(Debug)]
 pub enum Error {
-    HelpRequested(String),
+    HelpRequested { text: String, color: ColorChoice },
     CompletionRequested(String),
     Io {
         path: PathBuf,
@@ -219,6 +231,7 @@ pub enum Error {
     },
     MissingValue(String),
     InvalidCompletionShell(String),
+    InvalidColorChoice(String),
     Parse {
         field: String,
         value: String,
@@ -238,7 +251,8 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::HelpRequested(help) | Error::CompletionRequested(help) => write!(f, "{help}"),
+            Error::HelpRequested { text, .. } => write!(f, "{text}"),
+            Error::CompletionRequested(help) => write!(f, "{help}"),
             Error::Io { path, source } => write!(f, "failed to read {}: {source}", path.display()),
             Error::UnknownArgument(arg) => write!(f, "unknown argument: {arg}"),
             Error::UnknownField { field, source } => write!(f, "unknown {source} field: {field}"),
@@ -246,6 +260,10 @@ impl fmt::Display for Error {
             Error::InvalidCompletionShell(shell) => write!(
                 f,
                 "invalid completion shell: {shell:?}. Expected one of: bash, elvish, fish, powershell, zsh"
+            ),
+            Error::InvalidColorChoice(choice) => write!(
+                f,
+                "invalid color choice: {choice:?}. Expected one of: auto, always, never"
             ),
             Error::Parse { field, value, parser, source, message } => write!(
                 f,
@@ -272,7 +290,11 @@ where
     let argv = parse_argv(spec, &sources.args)?;
 
     if argv.help_requested {
-        return Err(Error::HelpRequested(render_help(spec)));
+        let color = argv.color_choice.unwrap_or(ColorChoice::Auto);
+        return Err(Error::HelpRequested {
+            text: render_help_with_color(spec, color),
+            color,
+        });
     }
 
     if let Some(shell) = argv.completion_shell {
@@ -320,6 +342,7 @@ struct ParsedArgv {
     values: BTreeMap<String, String>,
     config_path: Option<PathBuf>,
     completion_shell: Option<Shell>,
+    color_choice: Option<ColorChoice>,
     help_requested: bool,
 }
 
@@ -373,6 +396,14 @@ fn parse_argv(spec: &ConfigSpec, args: &[OsString]) -> Result<ParsedArgv> {
                 return Err(Error::MissingValue("--generate-completion".to_string()));
             }
             parsed.completion_shell = Some(parse_shell(&value)?);
+            continue;
+        }
+
+        if key == "color" {
+            if value == "true" {
+                return Err(Error::MissingValue("--color".to_string()));
+            }
+            parsed.color_choice = Some(parse_color_choice(&value)?);
             continue;
         }
 
@@ -497,6 +528,15 @@ fn parse_csv(text: &str) -> Value {
     )
 }
 
+fn parse_color_choice(text: &str) -> Result<ColorChoice> {
+    match text.to_ascii_lowercase().as_str() {
+        "auto" => Ok(ColorChoice::Auto),
+        "always" => Ok(ColorChoice::Always),
+        "never" => Ok(ColorChoice::Never),
+        _ => Err(Error::InvalidColorChoice(text.to_string())),
+    }
+}
+
 fn parse_shell(text: &str) -> Result<Shell> {
     match text.to_ascii_lowercase().as_str() {
         "bash" => Ok(Shell::Bash),
@@ -532,7 +572,19 @@ fn render_help(spec: &ConfigSpec) -> String {
 
 fn render_help_with_color(spec: &ConfigSpec, color: ColorChoice) -> String {
     let mut cmd = build_command(spec, color);
-    cmd.render_help().to_string()
+    let help = cmd.render_help();
+    if matches!(color, ColorChoice::Always) {
+        help.ansi().to_string()
+    } else {
+        help.to_string()
+    }
+}
+
+fn print_help_to_stdout(spec: &ConfigSpec, color: ColorChoice) -> std::io::Result<()> {
+    let mut cmd = build_command(spec, color);
+    cmd.print_help()?;
+    println!();
+    Ok(())
 }
 
 fn render_completion(spec: &ConfigSpec, shell: Shell, bin_name: &str) -> String {
@@ -543,8 +595,20 @@ fn render_completion(spec: &ConfigSpec, shell: Shell, bin_name: &str) -> String 
     String::from_utf8(buf).expect("clap completion output is UTF-8")
 }
 
+fn kwconf_help_styles() -> Styles {
+    Styles::styled()
+        .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
+        .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
+        .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+        .placeholder(AnsiColor::Cyan.on_default())
+        .error(AnsiColor::Red.on_default().effects(Effects::BOLD))
+        .valid(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+        .invalid(AnsiColor::Yellow.on_default().effects(Effects::BOLD))
+}
+
 fn build_command(spec: &ConfigSpec, color: ColorChoice) -> Command {
     let mut cmd = Command::new(spec.name)
+        .styles(kwconf_help_styles())
         .color(color)
         .arg_required_else_help(false)
         .arg(
@@ -559,6 +623,13 @@ fn build_command(spec: &ConfigSpec, color: ColorChoice) -> Command {
                 .value_name("SHELL")
                 .value_parser(clap::value_parser!(Shell))
                 .help("Generate a shell completion script."),
+        )
+        .arg(
+            Arg::new("color")
+                .long("color")
+                .value_name("WHEN")
+                .value_parser(["auto", "always", "never"])
+                .help("Control help color: auto, always, or never."),
         );
 
     if let Some(about) = spec.about {
@@ -630,5 +701,12 @@ mod tests {
     fn shell_parser_accepts_common_names() {
         assert_eq!(parse_shell("bash").unwrap(), Shell::Bash);
         assert_eq!(parse_shell("pwsh").unwrap(), Shell::PowerShell);
+    }
+
+    #[test]
+    fn color_parser_accepts_common_names() {
+        assert!(matches!(parse_color_choice("auto").unwrap(), ColorChoice::Auto));
+        assert!(matches!(parse_color_choice("always").unwrap(), ColorChoice::Always));
+        assert!(matches!(parse_color_choice("never").unwrap(), ColorChoice::Never));
     }
 }

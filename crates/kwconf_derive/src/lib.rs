@@ -11,6 +11,15 @@ pub fn derive_config(input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_derive(ModalConfig, attributes(kwconf))]
+pub fn derive_modal_config(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match expand_modal_config(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = input.ident;
     let struct_opts = StructOpts::from_attrs(&input.attrs)?;
@@ -42,6 +51,13 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let field_ty = field.ty;
         let opts = FieldOpts::from_attrs(&field.attrs)?;
 
+        if opts.modal {
+            return Err(syn::Error::new_spanned(
+                field_ident,
+                "#[kwconf(modal)] is reserved for a future inline modal field API; derive kwconf::ModalConfig on an enum instead",
+            ));
+        }
+
         let default_expr = match opts.default {
             Some(Some(expr)) => default_expr_for_field(&field_ty, &expr),
             Some(None) | None => quote! { <#field_ty as ::core::default::Default>::default() },
@@ -64,6 +80,11 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let env = option_lit(opts.env.as_deref());
         let alias_lits = opts.aliases.iter().map(|value| quote! { #value });
         let choice_lits = opts.choices.iter().map(|value| quote! { #value });
+        let kind = if opts.subconfig {
+            quote! { ::kwconf::FieldKind::Subconfig(<#field_ty as ::kwconf::Config>::config_spec()) }
+        } else {
+            quote! { ::kwconf::FieldKind::Value }
+        };
 
         infos.push(quote! {
             ::kwconf::FieldInfo {
@@ -73,6 +94,7 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 help: #help,
                 parser: #parser,
                 choices: &[#(#choice_lits),*],
+                kind: #kind,
             }
         });
     }
@@ -90,14 +112,19 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
         impl ::kwconf::Config for #ident {
             fn config_spec() -> &'static ::kwconf::ConfigSpec {
-                static SPEC: ::kwconf::ConfigSpec = ::kwconf::ConfigSpec {
-                    name: #spec_name,
-                    about: #spec_about,
-                    fields: &[
-                        #(#infos),*
-                    ],
-                };
-                &SPEC
+                static SPEC: ::std::sync::OnceLock<::kwconf::ConfigSpec> = ::std::sync::OnceLock::new();
+                SPEC.get_or_init(|| {
+                    let fields: &'static [::kwconf::FieldInfo] = ::std::boxed::Box::leak(
+                        ::std::vec::Vec::from([
+                            #(#infos),*
+                        ]).into_boxed_slice()
+                    );
+                    ::kwconf::ConfigSpec {
+                        name: #spec_name,
+                        about: #spec_about,
+                        fields,
+                    }
+                })
             }
         }
 
@@ -133,6 +160,142 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
             pub fn completion_script(shell: ::kwconf::CompletionShell, bin_name: &str) -> ::std::string::String {
                 <Self as ::kwconf::Config>::completion_script(shell, bin_name)
+            }
+        }
+    })
+}
+
+fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = input.ident;
+    let enum_opts = StructOpts::from_attrs(&input.attrs)?;
+
+    let variants = match input.data {
+        Data::Enum(data) => data.variants,
+        _ => {
+            return Err(syn::Error::new_spanned(
+                ident,
+                "kwconf::ModalConfig only supports enums",
+            ));
+        }
+    };
+
+    let mut variant_infos = Vec::new();
+    let mut variant_arms = Vec::new();
+    let mut default_variant = None::<String>;
+
+    for variant in variants {
+        let variant_ident = variant.ident;
+        let opts = VariantOpts::from_attrs(&variant.attrs)?;
+        let variant_name = opts.name.unwrap_or_else(|| to_kebab_case(&variant_ident.to_string()));
+        if opts.default {
+            if default_variant.is_some() {
+                return Err(syn::Error::new_spanned(
+                    variant_ident,
+                    "only one modal variant can be marked #[kwconf(default)]",
+                ));
+            }
+            default_variant = Some(variant_name.clone());
+        }
+
+        let inner_ty = match variant.fields {
+            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => fields.unnamed.into_iter().next().unwrap().ty,
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    variant_ident,
+                    "kwconf::ModalConfig variants must be tuple variants with one Config payload",
+                ));
+            }
+        };
+
+        let help = option_lit(opts.help.as_deref());
+        let alias_lits = opts.aliases.iter().map(|value| quote! { #value });
+        let variant_name_lit = variant_name.clone();
+
+        variant_infos.push(quote! {
+            ::kwconf::ModalVariantInfo {
+                name: #variant_name_lit,
+                aliases: &[#(#alias_lits),*],
+                help: #help,
+                config_spec: <#inner_ty as ::kwconf::Config>::config_spec(),
+            }
+        });
+
+        variant_arms.push(quote! {
+            #variant_name_lit => {
+                let cfg = <#inner_ty as ::kwconf::Config>::from_sources(selection.sources)?;
+                ::core::result::Result::Ok(Self::#variant_ident(cfg))
+            }
+        });
+    }
+
+    let spec_name = enum_opts.name.unwrap_or_else(|| ident.to_string());
+    let spec_about = option_lit(enum_opts.about.as_deref());
+    let default_variant_tokens = option_lit(default_variant.as_deref());
+
+    Ok(quote! {
+        impl ::kwconf::ModalConfig for #ident {
+            fn modal_spec() -> &'static ::kwconf::ModalSpec {
+                static SPEC: ::std::sync::OnceLock<::kwconf::ModalSpec> = ::std::sync::OnceLock::new();
+                SPEC.get_or_init(|| {
+                    let variants: &'static [::kwconf::ModalVariantInfo] = ::std::boxed::Box::leak(
+                        ::std::vec::Vec::from([
+                            #(#variant_infos),*
+                        ]).into_boxed_slice()
+                    );
+                    ::kwconf::ModalSpec {
+                        name: #spec_name,
+                        about: #spec_about,
+                        variants,
+                        default_variant: #default_variant_tokens,
+                    }
+                })
+            }
+
+            fn from_sources(sources: ::kwconf::Sources) -> ::kwconf::Result<Self> {
+                let selection = ::kwconf::resolve_modal_selection(Self::modal_spec(), sources)?;
+                match selection.variant {
+                    #(#variant_arms),*,
+                    other => ::core::result::Result::Err(::kwconf::Error::InvalidModalVariant(other.to_string())),
+                }
+            }
+        }
+
+        impl #ident {
+            pub fn modal_spec() -> &'static ::kwconf::ModalSpec {
+                <Self as ::kwconf::ModalConfig>::modal_spec()
+            }
+
+            pub fn from_sources(sources: ::kwconf::Sources) -> ::kwconf::Result<Self> {
+                <Self as ::kwconf::ModalConfig>::from_sources(sources)
+            }
+
+            #[allow(clippy::should_implement_trait)]
+            pub fn from_iter<I, T>(args: I) -> ::kwconf::Result<Self>
+            where
+                I: ::core::iter::IntoIterator<Item = T>,
+                T: ::core::convert::Into<::std::ffi::OsString>,
+            {
+                <Self as ::kwconf::ModalConfig>::from_iter(args)
+            }
+
+            pub fn try_cli() -> ::kwconf::Result<Self> {
+                <Self as ::kwconf::ModalConfig>::try_cli()
+            }
+
+            pub fn cli() -> Self {
+                <Self as ::kwconf::ModalConfig>::cli()
+            }
+
+            pub fn help() -> ::std::string::String {
+                <Self as ::kwconf::ModalConfig>::help()
+            }
+
+            pub fn help_with_color(color: ::kwconf::ColorChoice) -> ::std::string::String {
+                <Self as ::kwconf::ModalConfig>::help_with_color(color)
+            }
+
+            pub fn completion_script(shell: ::kwconf::CompletionShell, bin_name: &str) -> ::std::string::String {
+                <Self as ::kwconf::ModalConfig>::completion_script(shell, bin_name)
             }
         }
     })
@@ -203,6 +366,8 @@ struct FieldOpts {
     env: Option<String>,
     aliases: Vec<String>,
     choices: Vec<String>,
+    subconfig: bool,
+    modal: bool,
 }
 
 impl FieldOpts {
@@ -236,8 +401,48 @@ impl FieldOpts {
                     let arr: ExprArray = value.parse()?;
                     opts.choices = parse_string_array(arr)?;
                     Ok(())
+                } else if meta.path.is_ident("subconfig") {
+                    opts.subconfig = true;
+                    Ok(())
+                } else if meta.path.is_ident("modal") {
+                    opts.modal = true;
+                    Ok(())
                 } else {
                     Err(meta.error("unsupported field kwconf attribute"))
+                }
+            })?;
+        }
+        Ok(opts)
+    }
+}
+
+#[derive(Default)]
+struct VariantOpts {
+    name: Option<String>,
+    help: Option<String>,
+    aliases: Vec<String>,
+    default: bool,
+}
+
+impl VariantOpts {
+    fn from_attrs(attrs: &[syn::Attribute]) -> syn::Result<Self> {
+        let mut opts = VariantOpts::default();
+        for attr in attrs.iter().filter(|attr| attr.path().is_ident("kwconf")) {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("name") {
+                    opts.name = Some(parse_lit_string(meta.value()?)?);
+                    Ok(())
+                } else if meta.path.is_ident("help") {
+                    opts.help = Some(parse_lit_string(meta.value()?)?);
+                    Ok(())
+                } else if meta.path.is_ident("alias") {
+                    opts.aliases.push(parse_lit_string(meta.value()?)?);
+                    Ok(())
+                } else if meta.path.is_ident("default") {
+                    opts.default = true;
+                    Ok(())
+                } else {
+                    Err(meta.error("unsupported variant kwconf attribute"))
                 }
             })?;
         }
@@ -259,4 +464,23 @@ fn parse_string_array(arr: ExprArray) -> syn::Result<Vec<String>> {
         }
     }
     Ok(values)
+}
+
+fn to_kebab_case(name: &str) -> String {
+    let mut out = String::new();
+    for (index, ch) in name.chars().enumerate() {
+        if ch.is_uppercase() {
+            if index > 0 {
+                out.push('-');
+            }
+            for lower in ch.to_lowercase() {
+                out.push(lower);
+            }
+        } else if ch == '_' {
+            out.push('-');
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }

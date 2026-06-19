@@ -11,7 +11,7 @@ It keeps the kwconf contract:
 5. parsers only apply to string sources such as argv and env.
 
 The first implementation is intentionally narrow. It supports derived structs,
-TOML / JSON / YAML config files, explicit env bindings, generated help, colored
+TOML / JSON / YAML config files, explicit env bindings, nested subconfigs, modal subcommands, generated help, colored
 help via `clap`, completion scripts via `clap_complete`, and the parser names
 `auto`, `csv`, and `yaml`.
 
@@ -47,6 +47,8 @@ cargo run -p kwconf --example basic -- --color always --help
 cargo run -p kwconf --example basic -- --config examples/basic.toml --lr=0.01 --tags=red,blue
 TRAIN_TAGS=nightly,smoke cargo run -p kwconf --example basic -- --mode=safe
 cargo run -p kwconf --example kwconf_rs_train -- --config examples/parity/train.toml --lr=0.01 --tags=argv,override
+cargo run -p kwconf --example nested -- --config examples/nested.toml --optimizer.lr=0.02
+cargo run -p kwconf --example modal -- --config examples/modal.toml train --lr=0.02
 ```
 
 Generate shell completions:
@@ -98,6 +100,88 @@ struct TrainConfig {
     tags: Vec<String>,
 }
 ```
+
+
+## Nested subconfigs
+
+Use `#[kwconf(subconfig)]` for a field that is another `kwconf::Config`.
+Config files use nested tables. CLI flags use dotted paths.
+
+```rust
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, kwconf::Config)]
+struct OptimizerConfig {
+    #[kwconf(default = 0.001, help = "Learning rate.")]
+    lr: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, kwconf::Config)]
+struct JobConfig {
+    #[kwconf(default = 64)]
+    width: usize,
+
+    #[kwconf(subconfig)]
+    optimizer: OptimizerConfig,
+}
+```
+
+```toml
+width = 128
+
+[optimizer]
+lr = 0.01
+```
+
+```bash
+cargo run -p kwconf --example nested -- --config examples/nested.toml --optimizer.lr=0.02
+```
+
+Nested env bindings live on the nested fields. The same precedence applies:
+
+```text
+defaults < config file < env < argv
+```
+
+## Modal subcommands
+
+Use `#[derive(kwconf::ModalConfig)]` on an enum. Each variant wraps one
+`kwconf::Config` payload.
+
+```rust
+#[derive(Debug, Clone, kwconf::ModalConfig)]
+#[kwconf(name = "kwtool", about = "Modal CLI demo.")]
+enum KwTool {
+    #[kwconf(default, help = "Run training.")]
+    Train(TrainConfig),
+
+    #[kwconf(alias = "test", help = "Run evaluation.")]
+    Eval(EvalConfig),
+}
+
+let command = KwTool::cli();
+```
+
+Run a subcommand directly:
+
+```bash
+cargo run -p kwconf --example modal -- train --lr=0.02 --tags=cli,tag
+```
+
+Or select it from a modal config file:
+
+```toml
+command = "train"
+
+[train]
+lr = 0.01
+tags = ["file", "demo"]
+```
+
+```bash
+cargo run -p kwconf --example modal -- --config examples/modal.toml train --lr=0.02
+```
+
+Global modal flags such as `--config`, `--color`, and `--generate-completion`
+go before the subcommand. Subcommand-specific flags go after it.
 
 ## Parsers
 

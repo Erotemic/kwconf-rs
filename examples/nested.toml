@@ -1,0 +1,5 @@
+width = 128
+
+[optimizer]
+lr = 0.01
+kind = "sgd"

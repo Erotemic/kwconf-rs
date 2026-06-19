@@ -94,6 +94,71 @@ let cfg = TrainConfig::cli();
 
 Use `try_cli()` or `from_iter(...)` in tests.
 
+
+## Nested configs
+
+Python kwconf subconfigs map to nested Rust structs.
+
+```python
+class OptimizerConfig(kwconf.Config):
+    lr = 0.001
+
+class JobConfig(kwconf.Config):
+    optimizer = OptimizerConfig()
+```
+
+Rust:
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
+struct OptimizerConfig {
+    #[kwconf(default = 0.001)]
+    lr: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
+struct JobConfig {
+    #[kwconf(subconfig)]
+    optimizer: OptimizerConfig,
+}
+```
+
+Config files use nested tables. CLI flags use dotted paths:
+
+```bash
+job --optimizer.lr=0.02
+```
+
+## Modal configs
+
+Python kwconf modal configs map to Rust enums.
+
+```rust
+#[derive(Debug, Clone, kwconf::ModalConfig)]
+enum KwTool {
+    #[kwconf(default, help = "Run training.")]
+    Train(TrainConfig),
+
+    #[kwconf(alias = "test", help = "Run evaluation.")]
+    Eval(EvalConfig),
+}
+```
+
+Run with a subcommand:
+
+```bash
+kwtool train --lr=0.02
+```
+
+Or select the mode in a config file:
+
+```toml
+command = "train"
+
+[train]
+lr = 0.01
+```
+
 ## Help colors
 
 Python kwconf can use `rich_argparse` when it is installed.
@@ -144,13 +209,13 @@ completion content.
 
 ## Current gaps
 
-The first Rust crate does not attempt full Python parity.
+The first Rust crate covers the main kwconf porting shapes: structs, nested subconfigs, modal subcommands, parsers, env, config files, help color, and completions.
 
-Deferred areas:
+Still deferred:
 
-- nested config ergonomics;
-- modal / subcommand config;
 - richer provenance reporting;
+- snapshot docs for generated help;
+- install docs for completion scripts;
 - deeper clap interop.
 
 Add features when real ports need them.

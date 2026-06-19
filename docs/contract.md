@@ -32,6 +32,26 @@ Supported file extensions:
 Config files use field names as keys. Dashes and underscores are treated the
 same at source boundaries.
 
+Nested subconfigs use nested tables:
+
+```toml
+width = 128
+
+[optimizer]
+lr = 0.01
+kind = "sgd"
+```
+
+Modal config files select a subcommand with `command` or `mode` and keep each
+variant under its own table:
+
+```toml
+command = "train"
+
+[train]
+lr = 0.01
+```
+
 ## Env
 
 Env is opt-in per field:
@@ -41,7 +61,8 @@ Env is opt-in per field:
 tags: Vec<String>,
 ```
 
-Env values are strings, so the field parser is used.
+Env values are strings, so the field parser is used. Nested env bindings live on
+the nested field.
 
 ## Argv
 
@@ -55,7 +76,20 @@ Argv accepts long options:
 
 Boolean flags without an explicit value receive `true`.
 
+Nested subconfigs use dotted paths:
+
+```text
+--optimizer.lr=0.02
+```
+
+Modal subcommands use the normal command shape:
+
+```text
+kwtool train --lr=0.02
+```
+
 `--config`, `--help`, `--color`, and `--generate-completion` are reserved by the runtime.
+For modal CLIs, put global flags before the subcommand and subcommand fields after it.
 
 ## Parsers
 
@@ -101,15 +135,51 @@ Use it when a field needs structured data from env or argv.
 mode: String,
 ```
 
+## Nested subconfigs
+
+Mark nested structs with `#[kwconf(subconfig)]`.
+
+```rust
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, kwconf::Config)]
+struct JobConfig {
+    #[kwconf(default = 64)]
+    width: usize,
+
+    #[kwconf(subconfig)]
+    optimizer: OptimizerConfig,
+}
+```
+
+Nested config fields appear in help and completions as dotted flags.
+
+## Modal subcommands
+
+Mark an enum with `#[derive(kwconf::ModalConfig)]`. Each variant wraps one
+`kwconf::Config` payload.
+
+```rust
+#[derive(Debug, Clone, kwconf::ModalConfig)]
+enum KwTool {
+    #[kwconf(default, help = "Run training.")]
+    Train(TrainConfig),
+
+    #[kwconf(alias = "test", help = "Run evaluation.")]
+    Eval(EvalConfig),
+}
+```
+
+The default variant is used when argv and config do not select one.
+
 ## Help and completion
 
 `kwconf-rs` builds help and completion metadata from the same field spec.
 
 - `Config::help()` renders normal help.
+- `ModalConfig::help()` renders modal help.
 - `--color auto|always|never` controls color for CLI help.
-- `Config::help_with_color(...)` renders help with an explicit color policy.
+- `help_with_color(...)` renders help with an explicit color policy.
 - `--generate-completion SHELL` prints a completion script.
-- `Config::completion_script(...)` returns the script as a string.
+- `completion_script(...)` returns the script as a string.
 
 Supported completion shells are `bash`, `elvish`, `fish`, `powershell`, and
 `zsh`.

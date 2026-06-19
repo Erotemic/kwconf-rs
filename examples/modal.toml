@@ -1,0 +1,9 @@
+command = "train"
+
+[train]
+lr = 0.01
+tags = ["file", "demo"]
+
+[eval]
+split = "test"
+threshold = 0.9

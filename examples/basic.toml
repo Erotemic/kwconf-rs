@@ -1,0 +1,3 @@
+lr = 0.005
+mode = "safe"
+tags = ["file", "toml"]

@@ -1,0 +1,5 @@
+lr = 0.002
+mode = "safe"
+tags = ["file", "baseline"]
+cache = false
+width = 256

@@ -7,7 +7,10 @@ same CLI shape yourself.
 - Rust: `crates/kwconf/examples/kwconf_rs_full_app.rs`
 - Shared YAML fixtures: `examples/parity_full/*.yaml`
 
-The demo covers the features that matter most when porting a kwconf CLI to Rust:
+The demo covers the features that matter most when porting a kwconf CLI to Rust.
+Parity here means matching the intended configuration model, not preserving every
+Python edge behavior. In particular, Rust preserves explicit empty CSV fields
+where Python kwconf currently filters them.
 
 - modal commands: `train`, `eval`, and `export`;
 - modal aliases: `fit` for `train`, `score` for `eval`;

@@ -1,8 +1,6 @@
 //! Only declared env bindings are read, and only when asked.
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
+#[derive(Debug, Clone, PartialEq, kwconf::Config)]
 #[kwconf(name = "envdemo")]
 struct EnvConfig {
     #[kwconf(default = "unset", env = "KWCONF_TEST_LABEL_7f3a")]
@@ -33,7 +31,13 @@ fn empty_sources_ignore_the_process_environment() {
     );
 
     let cfg = EnvConfig::from_iter(["envdemo"]).unwrap();
-    assert_eq!(cfg.label, "from-process", "from_iter reads the process env");
+    assert_eq!(cfg.label, "unset", "from_iter is explicit argv-only");
+
+    let cfg = EnvConfig::from_sources(
+        kwconf::Sources::from_iter(["envdemo"]).with_process_env(true),
+    )
+    .unwrap();
+    assert_eq!(cfg.label, "from-process");
 }
 
 #[cfg(unix)]
@@ -59,7 +63,7 @@ fn unrelated_non_unicode_environment_variables_do_not_panic() {
         OsString::from_vec(b"\xff".to_vec()),
     );
 
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
+    #[derive(Debug, Clone, PartialEq, kwconf::Config)]
     #[kwconf(name = "envbad")]
     struct BadEnvConfig {
         #[kwconf(env = "KWCONF_TEST_LABEL_BAD_7f3a")]

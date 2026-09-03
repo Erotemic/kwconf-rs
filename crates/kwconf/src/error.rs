@@ -109,9 +109,8 @@ pub enum Error {
         value: String,
         choices: &'static [&'static str],
     },
-    /// The merged sources could not be deserialized into the config type.
-    /// `field` is the dotted path when it is known, otherwise empty.
-    Deserialize {
+    /// A source value could not be converted into the destination field type.
+    InvalidValue {
         field: String,
         message: String,
     },
@@ -150,10 +149,10 @@ impl fmt::Display for Error {
                 "invalid value for {field}: {value:?}. Expected one of: {}",
                 choices.join(", ")
             ),
-            Error::Deserialize { field, message } if field.is_empty() => {
-                write!(f, "failed to deserialize config: {message}")
+            Error::InvalidValue { field, message } if field.is_empty() => {
+                write!(f, "invalid config value: {message}")
             }
-            Error::Deserialize { field, message } => {
+            Error::InvalidValue { field, message } => {
                 write!(f, "invalid value for {field}: {message}")
             }
             Error::Message(message) => f.write_str(message),

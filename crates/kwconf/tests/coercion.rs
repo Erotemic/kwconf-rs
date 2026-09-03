@@ -1,10 +1,10 @@
 //! argv and env text is coerced by the destination type, not by its spelling.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Mode {
     #[default]
@@ -12,7 +12,7 @@ enum Mode {
     Safe,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
+#[derive(Debug, Clone, PartialEq, kwconf::Config)]
 #[kwconf(name = "coerce")]
 struct CoerceConfig {
     #[kwconf(env = "KWC_LABEL")]
@@ -103,16 +103,12 @@ fn numeric_fields_parse_by_type_and_report_the_field() {
 }
 
 #[test]
-fn bool_fields_accept_kwconf_spellings_and_negation() {
+fn bool_fields_accept_strict_kwconf_spellings_and_negation() {
     for (text, expected) in [
         ("true", true),
         ("false", false),
         ("1", true),
         ("0", false),
-        ("yes", true),
-        ("no", false),
-        ("on", true),
-        ("off", false),
         ("TRUE", true),
     ] {
         let cfg = parse(["coerce", &format!("--flag={text}")]).unwrap();
@@ -123,7 +119,7 @@ fn bool_fields_accept_kwconf_spellings_and_negation() {
     assert!(!parse(["coerce", "--flag", "--no-flag"]).unwrap().flag);
     assert!(parse(["coerce", "--no-flag", "--flag"]).unwrap().flag);
     assert!(
-        parse(["coerce", "--no-flag", "--no-flag", "--flag=yes"])
+        parse(["coerce", "--no-flag", "--no-flag", "--flag=true"])
             .unwrap()
             .flag
     );
@@ -133,8 +129,10 @@ fn bool_fields_accept_kwconf_spellings_and_negation() {
             .flag
     );
 
-    let err = parse(["coerce", "--flag=maybe"]).unwrap_err();
-    assert!(err.to_string().contains("invalid value for flag"), "{err}");
+    for invalid in ["yes", "no", "on", "off", "maybe"] {
+        let err = parse(["coerce", &format!("--flag={invalid}")]).unwrap_err();
+        assert!(err.to_string().contains("invalid value for flag"), "{err}");
+    }
 
     let cfg = CoerceConfig::from_sources(
         kwconf::Sources::empty()
@@ -167,7 +165,11 @@ fn csv_elements_are_coerced_by_the_element_type() {
         cfg.words,
         vec!["1".to_string(), "2".to_string(), "3".to_string()]
     );
-    assert!(parse(["coerce", "--ints="]).unwrap().ints.is_empty());
+    let cfg = parse(["coerce", "--words=a,,b,"]).unwrap();
+    assert_eq!(cfg.words, vec!["a", "", "b", ""]);
+    let cfg = parse(["coerce", "--words="]).unwrap();
+    assert_eq!(cfg.words, vec![""]);
+    assert!(parse(["coerce", "--ints="]).is_err());
 
     let err = parse(["coerce", "--ints=1,x"]).unwrap_err();
     assert!(err.to_string().contains("invalid value for ints"), "{err}");
@@ -229,14 +231,14 @@ fn chars_yaml_and_any_values() {
 
 #[test]
 fn deserialize_errors_name_nested_fields() {
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
+    #[derive(Debug, Clone, PartialEq, kwconf::Config)]
     #[kwconf(name = "inner")]
     struct Inner {
         #[kwconf(env = "KWC_INNER_N")]
         n: u8,
     }
 
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
+    #[derive(Debug, Clone, PartialEq, kwconf::Config)]
     #[kwconf(name = "outer")]
     struct Outer {
         #[kwconf(subconfig)]
@@ -246,11 +248,11 @@ fn deserialize_errors_name_nested_fields() {
     let err = Outer::from_sources(kwconf::Sources::empty().with_args(["outer", "--inner.n=300"]))
         .unwrap_err();
     match err {
-        kwconf::Error::Deserialize { field, message } => {
+        kwconf::Error::InvalidValue { field, message } => {
             assert_eq!(field, "inner.n");
             assert!(message.contains("300"), "{message}");
         }
-        other => panic!("expected deserialize error, got {other}"),
+        other => panic!("expected invalid-value error, got {other}"),
     }
 
     let err = Outer::from_sources(
@@ -261,4 +263,31 @@ fn deserialize_errors_name_nested_fields() {
     .unwrap_err();
     assert!(err.to_string().contains("inner.n"), "{err}");
     assert!(err.to_string().contains("(env)"), "{err}");
+}
+
+#[test]
+fn outer_serde_field_names_do_not_shape_kwconf() {
+    #[derive(Debug, Clone, PartialEq, Deserialize, kwconf::Config)]
+    #[kwconf(name = "serde-shape")]
+    struct SerdeShape {
+        #[serde(rename = "wire-name")]
+        #[kwconf(default = 1)]
+        rust_name: u8,
+    }
+
+    let cfg = SerdeShape::from_sources(
+        kwconf::Sources::empty()
+            .with_args(["serde-shape"])
+            .with_config_value(json!({"rust_name": 9})),
+    )
+    .unwrap();
+    assert_eq!(cfg.rust_name, 9);
+
+    let err = SerdeShape::from_sources(
+        kwconf::Sources::empty()
+            .with_args(["serde-shape"])
+            .with_config_value(json!({"wire-name": 9})),
+    )
+    .unwrap_err();
+    assert!(matches!(err, kwconf::Error::UnknownField { .. }), "{err}");
 }

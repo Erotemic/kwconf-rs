@@ -339,7 +339,7 @@ pub(crate) fn build_modal_model(spec: &'static ModalSpec) -> Result<ModalModel> 
                 .claim(name, owner.clone())
                 .map_err(|message| schema(message.replacen("option --", "subcommand ", 1)))?;
         }
-        let child = build_config_model(variant.config_spec, variant.name)?;
+        let child = build_config_model(variant.spec, variant.name)?;
         let mut sub = child.command;
         if let Some(help) = variant.help {
             sub = sub.about(help);

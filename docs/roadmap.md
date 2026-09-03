@@ -1,34 +1,35 @@
 # Roadmap
 
-## Done in the starter
+## 0.1 architecture
 
-- `#[derive(kwconf::Config)]`
-- `#[derive(kwconf::ModalConfig)]`
-- defaults, choices, aliases, and env bindings
-- nested subconfigs with `#[kwconf(subconfig)]`
-- modal subcommands with enum variants
-- source order: `defaults < config file < env < argv`
-- parser names: `auto`, `csv`, `yaml`
-- TOML / JSON / YAML config files
-- generated help
-- `clap` color policy for help
-- generated shell completion scripts
-- Python kwconf / Rust kwconf-rs parity demo
-- type-directed coercion of argv/env text (a `String` field keeps `"123"`)
-- one `clap` model for parsing, help, and completions
-- schema collision checks at compile time and at first use
-- generic config structs and `#[kwconf(crate = ...)]`
+- `Cli` / `ModalCli`: typed argv-only API with no Serde dependency.
+- `Config` / `ModalConfig`: layered `defaults < file < env < argv` API.
+- one clap command model for parsing, help, aliases, subcommands, and completions.
+- one optional kwconf derive layer; clap derive is not enabled underneath it.
+- direct typed mutation from `T::default()` rather than whole-config
+  serialize/merge/deserialize round trips.
+- config structs themselves do not require Serde derives.
+- type-directed raw parsing for full `Config` and `FromStr` parsing for
+  lightweight `Cli`.
+- nested subconfigs, modal commands, aliases, choices, strict bool negation,
+  TOML/JSON/YAML, env bindings, help color, and completions.
+- feature-matrix CI for no-default-features and derive-only builds.
 
 ## Next useful work
 
-- snapshot tests for help text;
-- install docs for completion scripts;
-- a small migration guide for real kwconf CLIs;
-- inline modal fields if real ports need them;
-- deeper clap interop (short options, positionals);
-- benchmarks for startup cost before adding lookup caches.
+- snapshot tests for representative help/error output;
+- benchmark cold compile and CLI startup before optimizing metadata lookup;
+- decide whether config formats should become individually selectable features
+  (`toml`, `json`, `yaml`) after real consumers establish which combinations
+  are useful;
+- add short options and positionals only where they map cleanly onto the config
+  object model;
+- improve custom scalar parsing ergonomics for `Cli` beyond manual `FromStr` if
+  real ports show a repeated need;
+- install docs for completion scripts.
 
 ## Keep deferred
 
-Avoid re-implementing all of `clap`. Use the Rust ecosystem where it is already
-strong, and keep kwconf-rs focused on the config contract.
+Do not build a general-purpose CLI builder. Clap already owns that problem.
+Kwconf should concentrate on the typed configuration-object model and source
+layering that distinguish it from clap.

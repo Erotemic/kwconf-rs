@@ -41,16 +41,17 @@ impl Sources {
         }
     }
 
-    /// Explicit argv (including the program name) plus the process environment.
+    /// Explicit argv (including the program name), with no implicit process environment.
     ///
-    /// Use [`Sources::empty`] with [`Sources::with_args`] for argv-only parsing.
+    /// Call [`Sources::with_process_env`] when process environment bindings should
+    /// also participate.
     #[allow(clippy::should_implement_trait)]
     pub fn from_iter<I, T>(args: I) -> Self
     where
         I: IntoIterator<Item = T>,
         T: Into<OsString>,
     {
-        Self::new().with_args(args)
+        Self::empty().with_args(args)
     }
 
     /// Replace argv. The first element is the program name.

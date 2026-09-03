@@ -12,6 +12,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo check -p kwconf --lib --no-default-features
+      - run: cargo check -p kwconf --lib --no-default-features --features derive
+      - run: cargo check -p kwconf --example cli --no-default-features --features derive
+      - name: Verify lightweight dependency tiers
+        shell: bash
+        run: |
+          if cargo tree -p kwconf --no-default-features -e normal | grep -Eq 'kwconf_derive|serde|syn v|quote v|proc-macro2 v'; then
+            echo "no-default-features unexpectedly contains Serde or proc-macro infrastructure"
+            exit 1
+          fi
+          if cargo tree -p kwconf --no-default-features --features derive -e normal | grep -Eq 'serde'; then
+            echo "derive-only unexpectedly contains Serde"
+            exit 1
+          fi
+          if cargo tree -p kwconf -e normal | grep -Eq 'serde_derive'; then
+            echo "the full runtime unexpectedly enables serde_derive"
+            exit 1
+          fi
       - run: cargo test --workspace
       - run: cargo doc --workspace --no-deps
         env:

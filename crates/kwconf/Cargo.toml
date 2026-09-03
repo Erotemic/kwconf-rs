@@ -5,20 +5,26 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "kwconf-style CLI and config resolution for Rust"
+description = "kwconf-style typed CLI and layered config resolution for Rust"
 readme = "../../README.md"
 keywords = ["cli", "config", "clap", "derive", "kwconf"]
 categories = ["command-line-interface", "config"]
 
+[features]
+default = ["derive", "config"]
+derive = ["dep:kwconf_derive"]
+config = ["dep:serde", "dep:serde_json", "dep:toml", "dep:yaml_serde"]
+
 [dependencies]
-kwconf_derive = { path = "../kwconf_derive", version = "0.1.0" }
-serde.workspace = true
-serde_json.workspace = true
+kwconf_derive = { path = "../kwconf_derive", version = "0.1.0", optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 clap.workspace = true
 clap_complete.workspace = true
-toml.workspace = true
-yaml_serde.workspace = true
+toml = { workspace = true, optional = true }
+yaml_serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-serde.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 trybuild = "1.0"

@@ -1,26 +1,39 @@
 # Porting from Python kwconf
 
-This crate favors a direct mechanical port.
+The Rust port keeps the configuration-object model but separates lightweight
+CLI use from layered configuration.
 
-## Imports
+## Pick the layer first
 
-Python:
-
-```python
-import kwconf
-```
-
-Rust:
+If the Python class is only being used to define argv, use `Cli`:
 
 ```rust
-use serde::{Deserialize, Serialize};
+#[derive(Debug, kwconf::Cli)]
+struct TrainArgs {
+    #[kwconf(default = 0.001)]
+    lr: f64,
+
+    #[kwconf(parser = "csv")]
+    tags: Vec<String>,
+}
 ```
 
-The Rust derive path stays explicit:
+This path has no Serde dependency.
+
+If the Python class uses config files or environment bindings, use `Config`:
 
 ```rust
-#[derive(Serialize, Deserialize, kwconf::Config)]
+#[derive(Debug, kwconf::Config)]
+struct TrainConfig {
+    #[kwconf(default = 0.001, env = "TRAIN_LR")]
+    lr: f64,
+
+    #[kwconf(parser = "csv", env = "TRAIN_TAGS")]
+    tags: Vec<String>,
+}
 ```
+
+The outer Rust config struct does not need Serde derives.
 
 ## Config classes become structs
 
@@ -36,7 +49,7 @@ class TrainConfig(kwconf.Config):
 Rust:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
+#[derive(Debug, kwconf::Config)]
 struct TrainConfig {
     #[kwconf(default = 0.001)]
     lr: f64,
@@ -57,26 +70,43 @@ struct TrainConfig {
 | `choices=[...]` | `#[kwconf(choices = [...])]` |
 | `parser='csv'` | `#[kwconf(parser = "csv")]` |
 | `alias='foo'` | `#[kwconf(alias = "foo")]` |
-| env binding | `#[kwconf(env = "NAME")]` |
+| env binding | `#[kwconf(env = "NAME")]` on `Config` |
+
+Rust doc comments are used for help text when `help = ...` is not supplied, so
+ordinary Rust documentation can usually replace repeated help strings.
 
 ## Source precedence
 
-Keep the same mental model:
+Full `Config` keeps:
 
 ```text
 defaults < config file < env < argv
 ```
 
-Config files are structured. Env and argv are strings, so parser metadata matters
-there.
+`Cli` is intentionally argv-only.
+
+`Config::from_iter(...)` is also argv-only for deterministic programmatic use.
+`Config::try_cli()` uses current argv plus declared process-environment
+bindings. Use `Sources` when tests or callers need an explicit config/env mix.
 
 ## Parser mapping
 
-| kwconf parser | kwconf-rs parser | Typical Rust field |
+| kwconf parser | kwconf-rs | Notes |
 | --- | --- | --- |
-| `auto` | `auto` | `String`, `bool`, numbers |
-| `csv` | `csv` | `Vec<String>` |
-| `yaml` | `yaml` | `Vec<T>`, maps, nested structs |
+| `auto` | `auto` | type-directed in `Config`, `FromStr` scalars in `Cli` |
+| `csv` | `csv` | typed `Vec<T>`; empty components are preserved in Rust |
+| `yaml` | `yaml` | full `Config` only |
+
+Python kwconf currently filters empty CSV components after trimming. Rust does
+not copy that behavior. For example:
+
+```text
+a,,b, -> ["a", "", "b", ""]
+```
+
+This keeps the information expressed by the delimiters.
+
+Boolean text in Rust is deliberately limited to `true/false` and `1/0`.
 
 ## CLI entrypoint
 
@@ -92,33 +122,20 @@ Rust:
 let cfg = TrainConfig::cli();
 ```
 
-Use `try_cli()` or `from_iter(...)` in tests. Both read declared env bindings
-from the process; use `Sources::empty().with_args(...)` for a fully explicit
-run.
-
+The same call shape works for `Cli` and `Config` derives.
 
 ## Nested configs
 
-Python kwconf subconfigs map to nested Rust structs.
-
-```python
-class OptimizerConfig(kwconf.Config):
-    lr = 0.001
-
-class JobConfig(kwconf.Config):
-    optimizer = OptimizerConfig()
-```
-
-Rust:
+Python nested config objects map to nested Rust structs.
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
+#[derive(Debug, kwconf::Config)]
 struct OptimizerConfig {
     #[kwconf(default = 0.001)]
     lr: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
+#[derive(Debug, kwconf::Config)]
 struct JobConfig {
     #[kwconf(subconfig)]
     optimizer: OptimizerConfig,
@@ -131,93 +148,75 @@ Config files use nested tables. CLI flags use dotted paths:
 job --optimizer.lr=0.02
 ```
 
+Use `kwconf::Cli` on both structs for the argv-only version.
+
 ## Modal configs
 
-Python kwconf modal configs map to Rust enums.
+Python modal CLIs map to Rust enums.
+
+Argv-only:
 
 ```rust
-#[derive(Debug, Clone, kwconf::ModalConfig)]
+#[derive(Debug, kwconf::ModalCli)]
 enum KwTool {
-    #[kwconf(default, help = "Run training.")]
+    Train(TrainArgs),
+    Eval(EvalArgs),
+}
+```
+
+Layered:
+
+```rust
+#[derive(Debug, kwconf::ModalConfig)]
+enum KwTool {
+    #[kwconf(default)]
     Train(TrainConfig),
 
-    #[kwconf(alias = "test", help = "Run evaluation.")]
+    #[kwconf(alias = "test")]
     Eval(EvalConfig),
 }
 ```
 
-Run with a subcommand:
+Both are clap subcommands. `ModalConfig` additionally permits config files to
+select a mode with `command` or `mode`.
 
-```bash
-kwtool train --lr=0.02
-```
+## Custom Rust field types
 
-Or select the mode in a config file:
+For lightweight `Cli`, scalar custom types should implement `FromStr`.
 
-```toml
-command = "train"
+For full `Config`, custom leaf types should implement/derive Serde
+`Deserialize`. The outer kwconf config struct and nested subconfig structs do
+not need to do so merely to participate in kwconf.
 
-[train]
-lr = 0.01
-```
+## Help and completion
 
-## Help colors
-
-Python kwconf can use `rich_argparse` when it is installed.
-
-Rust kwconf-rs uses `clap` help rendering with an explicit style palette:
-
-```rust
-let help = TrainConfig::help_with_color(kwconf::ColorChoice::Auto);
-```
-
-The CLI accepts this when the config opts in with `#[kwconf(special_options(color))]`:
+`#[kwconf(special_options(color))]` enables:
 
 ```bash
 train --color always --help
-train --color never --help
 ```
 
-`TrainConfig::cli()` uses `auto` by default. Tests can use `Never` for stable
-snapshots or `Always` to assert ANSI output.
-
-## Completion
-
-Python kwconf can use `argcomplete` when it is installed.
-
-Rust kwconf-rs emits completion scripts. The CLI flag is opt-in via `#[kwconf(special_options(generate_completion))]`:
+`#[kwconf(special_options(generate_completion))]` enables:
 
 ```bash
 train --generate-completion bash > train.bash
-train --generate-completion zsh > _train
 ```
 
-The same output is available from Rust:
+Only full `Config` / `ModalConfig` may enable `special_options(config)`.
 
-```rust
-let script = TrainConfig::completion_script(kwconf::CompletionShell::Bash, "train");
+## Dependency choices
+
+```toml
+# Full layered configuration
+kwconf = "0.1"
+
+# Python-like argv-only API with no Serde
+kwconf = { version = "0.1", default-features = false, features = ["derive"] }
+
+# No kwconf proc macro and no Serde
+kwconf = { version = "0.1", default-features = false }
 ```
 
-## Parity demo
-
-The repo includes both versions of the same CLI:
-
-- `examples/parity/kwconf_train.py`
-- `crates/kwconf/examples/kwconf_rs_train.rs`
-- `crates/kwconf/tests/parity.rs`
-
-The tests cover source precedence, parser behavior, generated help, and generated
-completion content.
-
-## Current gaps
-
-The first Rust crate covers the main kwconf porting shapes: structs, nested subconfigs, modal subcommands, parsers, env, config files, help color, and completions.
-
-Still deferred:
-
-- richer provenance reporting;
-- snapshot docs for generated help;
-- install docs for completion scripts;
-- deeper clap interop.
-
-Add features when real ports need them.
+For a hand-built CLI with no interest in kwconf's config-object semantics, use
+clap's builder API directly rather than treating kwconf as a competing CLI
+builder.

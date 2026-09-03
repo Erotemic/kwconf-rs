@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
+#[derive(Debug, Clone, kwconf::Config)]
 #[kwconf(
     name = "basic",
     about = "Small kwconf-rs demo.",

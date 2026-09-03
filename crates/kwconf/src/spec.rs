@@ -67,7 +67,7 @@ pub struct ModalVariantInfo {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
     pub help: Option<&'static str>,
-    pub config_spec: &'static ConfigSpec,
+    pub spec: &'static ConfigSpec,
 }
 
 /// Parser used for string-only sources.

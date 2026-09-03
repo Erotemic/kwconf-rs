@@ -1,19 +1,21 @@
-//! Source merging: defaults < config file < env < argv.
+//! Layered source resolution: defaults < config file < env < argv.
+//!
+//! Resolution starts from `T::default()` and mutates typed fields directly.
+//! The config struct itself is never round-tripped through Serde.
 
 use crate::command::{
     build_config_model, build_modal_model, extract, map_clap_error, normalize_argv,
-    render_completion, render_help, render_subcommand_help, ParsedArgs,
+    render_completion, render_help, render_subcommand_help,
 };
 use crate::error::{Error, Result};
 use crate::spec::{
-    choice_field, dotted_name, find_field, find_field_path, key_eq, leaf_paths, normalize_path,
-    ConfigSpec, FieldKind, FieldPath, ModalSpec, ModalVariantInfo,
+    choice_field, dotted_name, find_field, find_field_path, key_eq, leaf_paths, ConfigSpec,
+    FieldKind, FieldPath, ModalSpec, ModalVariantInfo,
 };
-use crate::tree::{choice_text, Node, RawToken};
+use crate::tree::choice_text;
 use crate::{Config, Sources};
 use clap::ColorChoice;
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
 use std::path::Path;
 
 /// One structured config layer and where it came from.
@@ -58,101 +60,12 @@ fn resolve_layers<T: Config>(
     sources: &Sources,
     argv: Vec<(FieldPath, String)>,
 ) -> Result<T> {
-    let mut root = defaults::<T>()?;
+    let mut config = T::default();
+
     for (value, source) in layers {
-        merge_object(spec, &mut root, value, source)?;
+        apply_config_object(&mut config, spec, value, source, &mut Vec::new())?;
     }
-    apply_env(spec, &mut root, sources)?;
-    for (path, text) in argv {
-        let field = *path.last().expect("field path is non-empty");
-        check_choice_text(&path, &text)?;
-        let token = RawToken {
-            text,
-            parser: field.parser,
-            source: "argv",
-        };
-        set_path(&mut root, &path, Node::Raw(token))?;
-    }
-    T::deserialize(Node::Object(root)).map_err(|err| Error::Deserialize {
-        field: err.path.join("."),
-        message: err.message,
-    })
-}
 
-fn defaults<T: Config>() -> Result<BTreeMap<String, Node>> {
-    let value = serde_json::to_value(T::default()).map_err(|err| Error::Deserialize {
-        field: String::new(),
-        message: format!("defaults could not be serialized: {err}"),
-    })?;
-    match value {
-        Value::Object(map) => Ok(Node::from_object(map)),
-        _ => Err(Error::Message(
-            "config defaults must serialize as an object".to_string(),
-        )),
-    }
-}
-
-fn merge_object(
-    spec: &'static ConfigSpec,
-    root: &mut BTreeMap<String, Node>,
-    value: Value,
-    source: &'static str,
-) -> Result<()> {
-    let Value::Object(map) = value else {
-        return Err(Error::Message(format!(
-            "{source} must contain an object at the top level"
-        )));
-    };
-
-    for (key, value) in map {
-        let key = normalize_path(&key);
-        if key.contains('.') {
-            let path = find_field_path(spec, &key).ok_or_else(|| Error::UnknownField {
-                field: key.clone(),
-                source,
-            })?;
-            match path.last().map(|field| field.kind) {
-                Some(FieldKind::Subconfig(child)) => {
-                    let target = ensure_object(root, &path)?;
-                    merge_object(child, target, value, source)?;
-                }
-                _ => {
-                    check_choice_value(&path, &value)?;
-                    set_path(root, &path, Node::Value(value))?;
-                }
-            }
-            continue;
-        }
-
-        let field = find_field(spec, &key).ok_or_else(|| Error::UnknownField {
-            field: key.clone(),
-            source,
-        })?;
-        match field.kind {
-            FieldKind::Value => {
-                check_choice_value(&[field], &value)?;
-                root.insert(field.name.to_string(), Node::Value(value));
-            }
-            FieldKind::Subconfig(child) => {
-                if !value.is_object() {
-                    return Err(Error::Message(format!(
-                        "{source} field {} must contain an object",
-                        field.name
-                    )));
-                }
-                let target = ensure_object(root, &[field])?;
-                merge_object(child, target, value, source)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn apply_env(
-    spec: &'static ConfigSpec,
-    root: &mut BTreeMap<String, Node>,
-    sources: &Sources,
-) -> Result<()> {
     for path in leaf_paths(spec) {
         let field = *path.last().expect("field path is non-empty");
         let Some(env_name) = field.env else {
@@ -160,53 +73,108 @@ fn apply_env(
         };
         if let Some(text) = sources.env_value(env_name)? {
             check_choice_text(&path, &text)?;
-            let token = RawToken {
-                text,
-                parser: field.parser,
-                source: "env",
-            };
-            set_path(root, &path, Node::Raw(token))?;
+            let full_name = dotted_name(&path);
+            config.__kwconf_apply_raw(&path, &full_name, &text, "env")?;
         }
     }
-    Ok(())
+
+    for (path, text) in argv {
+        check_choice_text(&path, &text)?;
+        let full_name = dotted_name(&path);
+        config.__kwconf_apply_raw(&path, &full_name, &text, "argv")?;
+    }
+
+    Ok(config)
 }
 
-/// Walk to the object that holds the last element of `path`, creating objects as needed.
-fn ensure_object<'a>(
-    root: &'a mut BTreeMap<String, Node>,
-    path: &[&crate::spec::FieldInfo],
-) -> Result<&'a mut BTreeMap<String, Node>> {
-    let mut current = root;
-    for field in path {
-        let entry = current
-            .entry(field.name.to_string())
-            .or_insert_with(|| Node::Object(BTreeMap::new()));
-        if let Node::Value(Value::Object(_)) = entry {
-            let Node::Value(Value::Object(map)) =
-                std::mem::replace(entry, Node::Object(BTreeMap::new()))
-            else {
-                unreachable!()
-            };
-            *entry = Node::Object(Node::from_object(map));
+fn apply_config_object<T: Config>(
+    config: &mut T,
+    spec: &'static ConfigSpec,
+    value: Value,
+    source: &'static str,
+    prefix: &mut FieldPath,
+) -> Result<()> {
+    let Value::Object(map) = value else {
+        return Err(Error::Message(format!(
+            "{source} must contain an object at the top level"
+        )));
+    };
+    apply_map(config, spec, map, source, prefix)
+}
+
+fn apply_map<T: Config>(
+    config: &mut T,
+    spec: &'static ConfigSpec,
+    map: Map<String, Value>,
+    source: &'static str,
+    prefix: &mut FieldPath,
+) -> Result<()> {
+    for (key, value) in map {
+        let normalized = crate::spec::normalize_path(&key);
+
+        if normalized.contains('.') {
+            let local = find_field_path(spec, &normalized).ok_or_else(|| Error::UnknownField {
+                field: normalized.clone(),
+                source,
+            })?;
+            let mut full = prefix.clone();
+            full.extend(local.iter().copied());
+            apply_path_value(config, &full, value, source)?;
+            continue;
         }
-        match entry {
-            Node::Object(map) => current = map,
-            _ => {
-                return Err(Error::Message(format!(
-                    "field {} must contain an object",
-                    field.name
-                )))
+
+        let field = find_field(spec, &normalized).ok_or_else(|| Error::UnknownField {
+            field: normalized.clone(),
+            source,
+        })?;
+        prefix.push(field);
+        match field.kind {
+            FieldKind::Value => {
+                check_choice_value(prefix, &value)?;
+                let full_name = dotted_name(prefix);
+                config.__kwconf_apply_value(prefix, &full_name, value, source)?;
+            }
+            FieldKind::Subconfig(child) => {
+                let Value::Object(child_map) = value else {
+                    return Err(Error::Message(format!(
+                        "{source} field {} must contain an object",
+                        dotted_name(prefix)
+                    )));
+                };
+                apply_map(config, child, child_map, source, prefix)?;
             }
         }
+        prefix.pop();
     }
-    Ok(current)
+    Ok(())
 }
 
-fn set_path(root: &mut BTreeMap<String, Node>, path: &FieldPath, node: Node) -> Result<()> {
-    let (leaf, parents) = path.split_last().expect("field path is non-empty");
-    let target = ensure_object(root, parents)?;
-    target.insert(leaf.name.to_string(), node);
-    Ok(())
+fn apply_path_value<T: Config>(
+    config: &mut T,
+    path: &FieldPath,
+    value: Value,
+    source: &'static str,
+) -> Result<()> {
+    let Some(field) = path.last() else {
+        return Err(Error::Schema("empty field path".to_string()));
+    };
+    match field.kind {
+        FieldKind::Value => {
+            check_choice_value(path, &value)?;
+            let full_name = dotted_name(path);
+            config.__kwconf_apply_value(path, &full_name, value, source)
+        }
+        FieldKind::Subconfig(child) => {
+            let Value::Object(map) = value else {
+                return Err(Error::Message(format!(
+                    "{source} field {} must contain an object",
+                    dotted_name(path)
+                )));
+            };
+            let mut prefix = path.clone();
+            apply_map(config, child, map, source, &mut prefix)
+        }
+    }
 }
 
 fn check_choice_text(path: &[&crate::spec::FieldInfo], text: &str) -> Result<()> {
@@ -348,10 +316,7 @@ pub fn resolve_modal_selection(
         .iter()
         .position(|variant| {
             key_eq(variant.name, &variant_name)
-                || variant
-                    .aliases
-                    .iter()
-                    .any(|alias| key_eq(alias, &variant_name))
+                || variant.aliases.iter().any(|alias| key_eq(alias, &variant_name))
         })
         .ok_or_else(|| Error::InvalidModalVariant(variant_name.clone()))?;
     let variant = &model.variants[index];
@@ -359,10 +324,10 @@ pub fn resolve_modal_selection(
     let child = match subcommand {
         Some((_, sub_matches)) => extract(
             sub_matches,
-            variant.info.config_spec.special_options,
+            variant.info.spec.special_options,
             &variant.bindings,
         )?,
-        None => ParsedArgs::default(),
+        None => Default::default(),
     };
     let color = child.color.or(root.color).unwrap_or(ColorChoice::Auto);
     if child.help {
@@ -373,7 +338,7 @@ pub fn resolve_modal_selection(
         )));
     }
     if let Some(shell) = child.completion {
-        let child_model = build_config_model(variant.info.config_spec, variant.info.name)?;
+        let child_model = build_config_model(variant.info.spec, variant.info.name)?;
         return Err(Error::CompletionRequested(render_completion(
             child_model.command,
             shell,
@@ -402,7 +367,7 @@ pub fn resolve_modal_selection(
 /// Resolve the selected variant's payload config.
 pub fn resolve_modal_variant<T: Config>(selection: ModalSelection) -> Result<T> {
     resolve_layers::<T>(
-        selection.variant.config_spec,
+        selection.variant.spec,
         selection.layers,
         &selection.sources,
         selection.argv,
@@ -419,13 +384,9 @@ fn modal_variant_from_config(config_value: Option<&Value>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-/// Pick the selected variant's table out of a modal config value.
-///
-/// A file may either keep one table per variant or be flat for the selected
-/// variant. Table keys are matched dash/underscore-insensitively.
 fn modal_child_config_value(
-    spec: &ModalSpec,
-    selected: &ModalVariantInfo,
+    spec: &'static ModalSpec,
+    selected: &'static ModalVariantInfo,
     value: Value,
 ) -> Option<Value> {
     let Value::Object(map) = value else {

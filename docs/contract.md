@@ -1,244 +1,193 @@
 # kwconf-rs contract
 
-This repo starts a Rust implementation of the kwconf CLI/config contract.
+## Two layers
 
-## Source order
+`kwconf-rs` has a lightweight CLI layer and a layered configuration layer.
 
-Values resolve in this order:
+### `Cli`
+
+`#[derive(kwconf::Cli)]` turns a normal struct into a typed argv parser backed by
+one clap `Command`. It has no Serde dependency.
+
+The derive-generated implementation starts from `Self::default()` and applies
+argv assignments in order, so the last assignment to a field wins.
+
+### `Config`
+
+`#[derive(kwconf::Config)]` adds config files and declared environment bindings.
+Its source order is:
 
 ```text
 defaults < config file < env < argv
 ```
 
-A later source wins for the same field.
+Resolution also starts from `Self::default()` and applies typed fields directly.
+The config struct itself is not serialized into an intermediate JSON object and
+does not need to implement `Serialize` or `Deserialize`.
+
+Serde remains an internal leaf-value decoding mechanism for the full `Config`
+layer. A custom leaf type used with `Config` must implement `Deserialize`; the
+outer config and nested `#[kwconf(subconfig)]` structs do not.
 
 ## Defaults
 
-`#[kwconf(default = EXPR)]` sets the default value for a field.
+`#[kwconf(default = EXPR)]` sets a field default. Otherwise kwconf uses
+`Default::default()` for that field.
 
-Fields without an explicit default use `Default::default()`.
+The derive implements `Default` for the config/CLI struct.
+
+## CLI grammar ownership
+
+One clap command model owns:
+
+- argv recognition;
+- long-option aliases;
+- dash/underscore normalization;
+- bool negation flags;
+- modal subcommands;
+- help;
+- color policy; and
+- completion generation.
+
+Kwconf does not maintain a second handwritten argv parser.
+
+## Names
+
+Field `some_value` is exposed canonically as `--some-value` and accepts the
+underscore spelling as an alias. Dotted subconfig paths apply the same rule to
+each component.
+
+Schema collisions are rejected before parsing. This includes canonical/alias
+collisions, dash/underscore-equivalent names, bool negation collisions, modal
+variant alias collisions, and enabled special-option names.
+
+## Boolean values
+
+Boolean text accepts exactly:
+
+```text
+true false 1 0
+```
+
+`true`/`false` matching is ASCII-case-insensitive. `yes/no` and `on/off` are not
+part of the contract.
+
+A direct `bool` field also receives a valueless positive flag and a generated
+negation flag:
+
+```text
+--cache
+--no-cache
+```
+
+The last assignment in argv wins.
+
+## Lightweight CLI scalar parsing
+
+`Cli` uses ordinary Rust `FromStr` for scalar fields. In addition:
+
+- `bool` uses the strict spellings above;
+- `Option<T>` treats `none` and `null` as `None`;
+- `Vec<T>` uses `parser = "csv"` and parses every component through `T::from_str`;
+- `parser = "yaml"` is rejected because it belongs to the Serde-backed config layer;
+- env bindings and `special_options(config)` are rejected because `Cli` is argv-only.
+
+This keeps the derive-only dependency path free of Serde.
+
+## Full config raw parsing
+
+For argv/env values in `Config`, parsing is destination-type-directed through
+Serde's deserializer interface.
+
+### `auto`
+
+- `String`: original text.
+- `bool`: strict kwconf boolean spellings.
+- integer/float types: trimmed numeric parsing.
+- `Option<T>`: `null`/`none` => `None`.
+- unit enum: bare variant spelling.
+- sequence/map/struct: structured JSON where the destination asks for it.
+- untyped `serde_json::Value`: infer bool, number, null, JSON arrays/objects;
+  otherwise keep a string.
+
+### `csv`
+
+Comma-separated fields are trimmed and decoded by element type. Empty fields
+are preserved rather than filtered:
+
+```text
+a,,b, -> ["a", "", "b", ""]
+```
+
+Therefore an empty input is one empty `String` element, while an empty numeric
+component fails numeric parsing. This is an intentional divergence from Python
+kwconf's current empty-component filtering.
+
+### `yaml`
+
+YAML is parsed before destination conversion. Malformed YAML is always an
+error; a `String` field does not turn malformed YAML back into the raw token.
 
 ## Config files
 
-When enabled with `#[kwconf(special_options(config))]`, `--config PATH` loads a structured file before env and argv. Programmatic callers can still pass a config path through `Sources` without enabling the CLI flag.
-
-Supported file extensions:
+With the `config` feature, supported extensions are:
 
 - `.toml`
 - `.json`
 - `.yaml`
 - `.yml`
 
-Config files use field names as keys. Dashes and underscores are treated the
-same at source boundaries.
+Unknown extensions are tried as TOML, JSON, and YAML and report all three
+parser failures when none succeeds.
 
-Nested subconfigs use nested tables:
+Config keys use kwconf field names and aliases, with dash/underscore
+normalization. They do not depend on Serde rename attributes on the outer config
+struct because kwconf no longer deserializes that struct wholesale.
+
+Nested subconfigs use nested objects/tables or dotted paths.
+
+## Environment
+
+Environment bindings are opt-in per field:
+
+```rust
+#[kwconf(env = "TRAIN_LR")]
+lr: f64,
+```
+
+Only declared names are queried from the process. Explicit values supplied via
+`Sources` override the process environment.
+
+`Config::from_iter` is argv-only. `Config::try_cli` reads current argv plus
+declared process-environment bindings. This makes explicit test/programmatic
+argv deterministic.
+
+## Modal commands
+
+`ModalCli` and `ModalConfig` are enums whose variants wrap one payload struct.
+Both use clap subcommands. `ModalConfig` additionally allows config files to
+select the variant through `command` or `mode` and to store payloads under
+variant tables.
+
+## Features
 
 ```toml
-width = 128
+# No proc macros, no Serde
+kwconf = { version = "0.1", default-features = false }
 
-[optimizer]
-lr = 0.01
-kind = "sgd"
+# Python-like CLI struct API, one kwconf proc-macro layer, no Serde
+kwconf = { version = "0.1", default-features = false, features = ["derive"] }
+
+# Full layered config API (default)
+kwconf = "0.1"
 ```
 
-Modal config files select a subcommand with `command` or `mode` and keep each
-variant under its own table:
-
-```toml
-command = "train"
-
-[train]
-lr = 0.01
-```
-
-## Env
-
-Env is opt-in per field:
-
-```rust
-#[kwconf(env = "TRAIN_TAGS")]
-tags: Vec<String>,
-```
-
-Env values are strings, so the field parser is used. Nested env bindings live on
-the nested field.
-
-Only declared variables are read, one at a time, so an unrelated variable with
-non-Unicode content never affects a run. A declared variable that is not valid
-UTF-8 is an error. `Sources::new()`, `Sources::from_iter(...)`, `cli()`,
-`try_cli()`, and `from_iter(...)` read the process environment;
-`Sources::empty()` does not unless `with_process_env(true)` is set. Explicit
-`with_env(...)` bindings win over the process environment.
-
-## Argv
-
-Argv is recognized by one `clap` command model that is also used for help and
-completion scripts, so the three never disagree.
-
-Argv accepts long options:
-
-```text
---name value
---name=value
---bool-flag
---no-bool-flag
-```
-
-Boolean flags without an explicit value receive `true`; `--no-flag` sets the
-field to `false`. When the same field is assigned more than once, the last
-assignment in argv wins, including across `--flag` and `--no-flag`.
-
-Dashes and underscores are interchangeable in option names, in any mix.
-Aliases apply to every component of a dotted path, so with a subconfig field
-`optimizer` aliased to `opt` and a leaf `learning_rate` aliased to `lr`,
-`--opt.lr=1` is accepted. Help lists the canonical spelling, its underscore
-form, and leaf aliases.
-
-Unknown options, stray positionals, and anything after `--` are errors.
-`-h` and `--help` are always available.
-
-Nested subconfigs use dotted paths:
-
-```text
---optimizer.lr=0.02
-```
-
-Modal subcommands use the normal command shape:
-
-```text
-kwtool train --lr=0.02
-```
-
-`--help` is always handled by the runtime. Other runtime flags are opt-in so applications can still use ordinary fields named `config`, `color`, or `generate_completion` when they want to.
-
-```rust
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, kwconf::Config)]
-#[kwconf(name = "train", special_options(config, color, generate_completion))]
-struct TrainConfig {
-    // ...
-}
-```
-
-For modal CLIs, root runtime flags go before the subcommand. If the selected subcommand config also enables a runtime flag, that flag can appear after the subcommand with the rest of the subcommand fields. A root `--config` file contributes the selected variant's table; a subcommand `--config` file is layered on top of it.
-
-The schema is validated before any parsing. Two fields, aliases, negations, or
-special options that would claim the same option (compared
-dash/underscore-insensitively) are a compile error inside one struct and an
-`Error::Schema` when the collision spans nested subconfigs. `help` is always
-reserved.
-
-## Parsers
-
-Parsers only apply to string-only sources: env and argv.
-
-argv and env text is kept verbatim until the final deserialization, and the
-destination field type decides how it is read. `--label=123` stays `"123"` for
-a `String` field and becomes `123` for a `u32` field. This mirrors Python
-kwconf, where `auto('123', str)` stays a string.
-
-### auto
-
-`auto` coerces text by the destination type:
-
-- `String`: the text as written.
-- `bool`: `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0` (case-insensitive).
-- integers and floats: parsed from the trimmed text.
-- `Option<T>`: `null` and `none` are `None`; anything else is `Some`.
-- unit enums: the text is the variant name (after serde renames).
-- `Vec<T>`, maps, and structs: a JSON array or object.
-- `serde_json::Value` and other untyped destinations: `true`/`false`, integers,
-  floats, `null`/`none`, JSON arrays and objects are inferred; other values
-  stay strings.
-
-### csv
-
-`csv` splits a comma-separated string and coerces each element by the element
-type, so `Vec<i64>` receives integers and `Vec<String>` receives strings.
-
-```text
---tags=red,blue
-```
-
-becomes:
-
-```text
-["red", "blue"]
-```
-
-An empty string is an empty list.
-
-### yaml
-
-`yaml` parses a YAML scalar, sequence, or mapping from a string and then
-deserializes the result into the field. A `String` field still receives the
-text of a scalar.
-
-Use it when a field needs structured data from env or argv.
-
-Deserialization errors name the dotted field path, the offending text, and its
-source (`argv` or `env`).
-
-## Choices
-
-`choices` validates values before deserialization. argv and env text is
-compared as written; config values are compared as strings, numbers, or
-booleans.
-
-```rust
-#[kwconf(default = "fast", choices = ["fast", "safe"])]
-mode: String,
-```
-
-## Nested subconfigs
-
-Mark nested structs with `#[kwconf(subconfig)]`.
-
-```rust
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, kwconf::Config)]
-struct JobConfig {
-    #[kwconf(default = 64)]
-    width: usize,
-
-    #[kwconf(subconfig)]
-    optimizer: OptimizerConfig,
-}
-```
-
-Nested config fields appear in help and completions as dotted flags.
-
-## Modal subcommands
-
-Mark an enum with `#[derive(kwconf::ModalConfig)]`. Each variant wraps one
-`kwconf::Config` payload.
-
-```rust
-#[derive(Debug, Clone, kwconf::ModalConfig)]
-enum KwTool {
-    #[kwconf(default, help = "Run training.")]
-    Train(TrainConfig),
-
-    #[kwconf(alias = "test", help = "Run evaluation.")]
-    Eval(EvalConfig),
-}
-```
-
-The default variant is used when argv and config do not select one.
+The default features are `derive` and `config`.
 
 ## Help and completion
 
-`kwconf-rs` builds help, completion scripts, and argv parsing from one `clap`
-command model.
+`--help` is built in. `special_options(color)` enables
+`--color auto|always|never`. `special_options(generate_completion)` enables
+`--generate-completion SHELL`.
 
-- `Config::help()` renders normal help.
-- `ModalConfig::help()` renders modal help.
-- `--help` inside `cli()` prints help and exits `0`; `try_cli()` returns
-  `Error::HelpRequested(Help)` with plain and ANSI text plus the requested
-  color policy.
-- `--color auto|always|never` controls color for CLI help when `special_options(color)` is enabled.
-- `help_with_color(...)` renders help with an explicit color policy without requiring the CLI flag.
-- `--generate-completion SHELL` prints a completion script when `special_options(generate_completion)` is enabled.
-- `completion_script(...)` returns the script as a string without requiring the CLI flag.
-
-Supported completion shells are `bash`, `elvish`, `fish`, `powershell`, and
-`zsh`.
+Supported completion shells are bash, elvish, fish, PowerShell, and zsh.

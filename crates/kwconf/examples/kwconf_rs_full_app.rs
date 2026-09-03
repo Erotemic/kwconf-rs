@@ -3,7 +3,11 @@ use serde_json::json;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "dataset", about = "Dataset settings.")]
+#[kwconf(
+    name = "dataset",
+    about = "Dataset settings.",
+    special_options(config, color, generate_completion)
+)]
 struct DatasetConfig {
     #[kwconf(default = "data/images", help = "Dataset root directory.")]
     root: String,
@@ -19,7 +23,11 @@ struct DatasetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "model", about = "Model settings.")]
+#[kwconf(
+    name = "model",
+    about = "Model settings.",
+    special_options(config, color, generate_completion)
+)]
 struct ModelConfig {
     #[kwconf(default = "resnet", choices = ["resnet", "unet"], help = "Model architecture.")]
     arch: String,
@@ -32,7 +40,11 @@ struct ModelConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "optimizer", about = "Optimizer settings.")]
+#[kwconf(
+    name = "optimizer",
+    about = "Optimizer settings.",
+    special_options(config, color, generate_completion)
+)]
 struct OptimizerConfig {
     #[kwconf(default = 0.001, help = "Learning rate.")]
     lr: f64,
@@ -45,7 +57,11 @@ struct OptimizerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "logging", about = "Logging settings.")]
+#[kwconf(
+    name = "logging",
+    about = "Logging settings.",
+    special_options(config, color, generate_completion)
+)]
 struct LoggingConfig {
     #[kwconf(default = "INFO", choices = ["DEBUG", "INFO", "WARNING"], help = "Log level.")]
     level: String,
@@ -58,7 +74,11 @@ struct LoggingConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "train", about = "Train with nested configs and parser-aware string inputs.")]
+#[kwconf(
+    name = "train",
+    about = "Train with nested configs and parser-aware string inputs.",
+    special_options(config, color, generate_completion)
+)]
 struct TrainConfig {
     #[kwconf(default = "local", alias = "preset", choices = ["local", "debug", "cluster"], help = "Execution profile.")]
     profile: String,
@@ -75,12 +95,20 @@ struct TrainConfig {
     #[kwconf(subconfig, help = "Logging settings.")]
     logging: LoggingConfig,
 
-    #[kwconf(default = false, alias = "dry", help = "Print the plan without running.")]
+    #[kwconf(
+        default = false,
+        alias = "dry",
+        help = "Print the plan without running."
+    )]
     dry_run: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "eval", about = "Evaluate a checkpoint with nested dataset settings.")]
+#[kwconf(
+    name = "eval",
+    about = "Evaluate a checkpoint with nested dataset settings.",
+    special_options(config, color, generate_completion)
+)]
 struct EvalConfig {
     #[kwconf(default = "runs/latest/checkpoint.pt", help = "Checkpoint path.")]
     checkpoint: String,
@@ -99,7 +127,11 @@ struct EvalConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "export", about = "Export a checkpoint to an interchange format.")]
+#[kwconf(
+    name = "export",
+    about = "Export a checkpoint to an interchange format.",
+    special_options(config, color, generate_completion)
+)]
 struct ExportConfig {
     #[kwconf(default = "runs/latest/checkpoint.pt", help = "Checkpoint path.")]
     checkpoint: String,
@@ -118,7 +150,11 @@ struct ExportConfig {
 }
 
 #[derive(Debug, Clone, kwconf::ModalConfig)]
-#[kwconf(name = "kwconf-parity", about = "Full kwconf-rs parity demo with modal commands and nested configs.")]
+#[kwconf(
+    name = "kwconf-parity",
+    about = "Full kwconf-rs parity demo with modal commands and nested configs.",
+    special_options(config, color, generate_completion)
+)]
 enum KwconfParityApp {
     #[kwconf(default, alias = "fit", help = "Train a model.")]
     Train(TrainConfig),

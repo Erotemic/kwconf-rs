@@ -17,7 +17,11 @@ fn temp_config(ext: &str, body: &str) -> PathBuf {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "backend", about = "Backend model options.")]
+#[kwconf(
+    name = "backend",
+    about = "Backend model options.",
+    special_options(config, color, generate_completion)
+)]
 struct BackendConfig {
     #[kwconf(default = "resnet", alias = "arch", choices = ["resnet", "vit", "toy"], help = "Model architecture.")]
     architecture: String,
@@ -28,12 +32,20 @@ struct BackendConfig {
     #[kwconf(parser = "csv", env = "KW_BACKEND_LABELS", help = "Backend labels.")]
     labels: Vec<String>,
 
-    #[kwconf(parser = "yaml", env = "KW_BACKEND_AUGS", help = "Backend augmentations.")]
+    #[kwconf(
+        parser = "yaml",
+        env = "KW_BACKEND_AUGS",
+        help = "Backend augmentations."
+    )]
     augmentations: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "feature-matrix", about = "Exercise supported kwconf-rs features.")]
+#[kwconf(
+    name = "feature-matrix",
+    about = "Exercise supported kwconf-rs features.",
+    special_options(config, color, generate_completion)
+)]
 struct FeatureMatrixConfig {
     #[kwconf(default = 0.001, env = "KW_LR", help = "Learning rate.")]
     lr: f64,
@@ -142,16 +154,25 @@ augmentations = ['file-aug']
 
     assert_eq!(cfg.lr, 0.03, "argv wins over env and config");
     assert!(cfg.cache, "env wins over config");
-    assert_eq!(cfg.mode, "debug", "env wins over config when argv is absent");
+    assert_eq!(
+        cfg.mode, "debug",
+        "env wins over config when argv is absent"
+    );
     assert_eq!(cfg.tags, vec!["argv".to_string(), "tag".to_string()]);
-    assert_eq!(cfg.schedule, vec!["env-schedule".to_string(), "env-extra".to_string()]);
+    assert_eq!(
+        cfg.schedule,
+        vec!["env-schedule".to_string(), "env-extra".to_string()]
+    );
     assert_eq!(cfg.retries, 3);
     assert_eq!(cfg.maybe_label, Some("env-label".to_string()));
     assert_eq!(cfg.numbers, vec![7, 8]);
     assert_eq!(cfg.metadata, json!({"source": "env"}));
     assert_eq!(cfg.backend.architecture, "toy", "nested alias in argv wins");
     assert_eq!(cfg.backend.batch_size, 128);
-    assert_eq!(cfg.backend.labels, vec!["env-label".to_string(), "env-extra".to_string()]);
+    assert_eq!(
+        cfg.backend.labels,
+        vec!["env-label".to_string(), "env-extra".to_string()]
+    );
     assert_eq!(cfg.backend.augmentations, vec!["env-aug".to_string()]);
 
     let _ = std::fs::remove_file(path);
@@ -286,10 +307,19 @@ fn csv_and_yaml_parsers_are_used_for_argv_and_env_string_sources() {
         ]);
 
     let cfg = FeatureMatrixConfig::from_sources(sources).unwrap();
-    assert_eq!(cfg.tags, vec!["one".to_string(), "two".to_string(), "three".to_string()]);
-    assert_eq!(cfg.backend.labels, vec!["cat".to_string(), "dog".to_string()]);
+    assert_eq!(
+        cfg.tags,
+        vec!["one".to_string(), "two".to_string(), "three".to_string()]
+    );
+    assert_eq!(
+        cfg.backend.labels,
+        vec!["cat".to_string(), "dog".to_string()]
+    );
     assert_eq!(cfg.schedule, vec!["crop".to_string(), "flip".to_string()]);
-    assert_eq!(cfg.backend.augmentations, vec!["blur".to_string(), "sharpen".to_string()]);
+    assert_eq!(
+        cfg.backend.augmentations,
+        vec!["blur".to_string(), "sharpen".to_string()]
+    );
 }
 
 #[test]
@@ -327,7 +357,9 @@ fn choices_are_checked_for_config_env_and_argv_sources() {
     assert!(env_err.to_string().contains("invalid value for mode"));
 
     let argv_err = parse_feature(["feature-matrix", "--backend.architecture=cnn"]).unwrap_err();
-    assert!(argv_err.to_string().contains("invalid value for architecture"));
+    assert!(argv_err
+        .to_string()
+        .contains("invalid value for architecture"));
 }
 
 #[test]
@@ -338,7 +370,9 @@ fn unknown_config_fields_are_rejected_at_top_level_and_inside_subconfigs() {
             .with_config_value(json!({"missing": 1})),
     )
     .unwrap_err();
-    assert!(top_err.to_string().contains("unknown config value field: missing"));
+    assert!(top_err
+        .to_string()
+        .contains("unknown config value field: missing"));
 
     let nested_err = FeatureMatrixConfig::from_sources(
         kwconf::Sources::empty()
@@ -346,13 +380,17 @@ fn unknown_config_fields_are_rejected_at_top_level_and_inside_subconfigs() {
             .with_config_value(json!({"backend": {"missing": 1}})),
     )
     .unwrap_err();
-    assert!(nested_err.to_string().contains("unknown config value field: missing"));
+    assert!(nested_err
+        .to_string()
+        .contains("unknown config value field: missing"));
 }
 
 #[test]
 fn reserved_runtime_options_report_missing_or_invalid_values() {
     let missing_config = parse_feature(["feature-matrix", "--config"]).unwrap_err();
-    assert!(missing_config.to_string().contains("missing value for --config"));
+    assert!(missing_config
+        .to_string()
+        .contains("missing value for --config"));
 
     let missing_completion =
         parse_feature(["feature-matrix", "--generate-completion"]).unwrap_err();

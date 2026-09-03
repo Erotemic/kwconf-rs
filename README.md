@@ -102,31 +102,6 @@ struct TrainConfig {
 ```
 
 
-
-## Full side-by-side parity demo
-
-For a larger demo with modal commands, nested subconfigs, aliases, choices,
-flags, csv/yaml parsers, shared YAML files, colored help, and Rust completion
-scripts, see [`docs/side-by-side-parity-demo.md`](docs/side-by-side-parity-demo.md).
-
-Quick comparison:
-
-```bash
-python examples/parity_full/kwconf_app.py train \
-    --config examples/parity_full/train.yaml \
-    --optimizer.lr=0.02 \
-    --logging.tags=cli,side \
-    --logging.metadata='{owner: cli, priority: 2}' \
-    --dry-run
-
-cargo run -p kwconf --example kwconf_rs_full_app -- train \
-    --config examples/parity_full/train.yaml \
-    --optimizer.lr=0.02 \
-    --logging.tags=cli,side \
-    --logging.metadata='{owner: cli, priority: 2}' \
-    --dry-run
-```
-
 ## Nested subconfigs
 
 Use `#[kwconf(subconfig)]` for a field that is another `kwconf::Config`.
@@ -205,8 +180,10 @@ tags = ["file", "demo"]
 cargo run -p kwconf --example modal -- --config examples/modal.toml train --lr=0.02
 ```
 
-Global modal flags such as `--config`, `--color`, and `--generate-completion`
-go before the subcommand. Subcommand-specific flags go after it.
+Modal root runtime flags such as `--config`, `--color`, and `--generate-completion`
+go before the subcommand when they are enabled on the modal enum. Subcommand
+runtime flags can also be enabled on the payload config and then placed after the
+subcommand with the other subcommand fields.
 
 ## Parsers
 
@@ -228,17 +205,28 @@ into the target struct.
 defaults < config file < env < argv
 ```
 
-The `--config PATH`, `--color WHEN`, and `--generate-completion SHELL` flags are
-reserved by the runtime. Config files may be TOML, JSON, YAML, or YML.
+`--help` is always handled by the runtime. The `--config PATH`, `--color WHEN`,
+and `--generate-completion SHELL` flags are opt-in special options so projects
+can still use ordinary fields named `config`, `color`, or `generate_completion`.
+Config files may be TOML, JSON, YAML, or YML.
+
+```rust
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, kwconf::Config)]
+#[kwconf(name = "train", special_options(config, color, generate_completion))]
+struct TrainConfig {
+    // fields...
+}
+```
+
 
 ## Colored help and completions
 
 `kwconf-rs` uses Rust-native CLI tooling for optional polish.
 
 - Help rendering is backed by `clap` with a Cargo-like style palette.
-- `--color auto|always|never` controls color for help output.
+- `#[kwconf(special_options(color))]` enables `--color auto|always|never`.
 - `Config::help_with_color(...)` lets callers choose `Auto`, `Always`, or `Never`.
-- `--generate-completion SHELL` emits a completion script.
+- `#[kwconf(special_options(generate_completion))]` enables `--generate-completion SHELL`.
 - `Config::completion_script(...)` exposes the same behavior to build scripts or tests.
 
 Use `--color always --help` to force ANSI color through terminals, logs, or test

@@ -57,8 +57,12 @@ pub trait Config: Default + Serialize + DeserializeOwned + Sized {
     fn cli() -> Self {
         match Self::try_cli() {
             Ok(cfg) => cfg,
-            Err(Error::HelpRequested { text, color }) => {
-                if matches!(color, ColorChoice::Auto) {
+            Err(Error::HelpRequested {
+                text,
+                color,
+                root_command,
+            }) => {
+                if root_command && matches!(color, ColorChoice::Auto) {
                     if let Err(err) = print_help_to_stdout(Self::config_spec(), color) {
                         eprintln!("failed to print help: {err}");
                         println!("{text}");
@@ -122,8 +126,12 @@ pub trait ModalConfig: Sized {
     fn cli() -> Self {
         match Self::try_cli() {
             Ok(cfg) => cfg,
-            Err(Error::HelpRequested { text, color }) => {
-                if matches!(color, ColorChoice::Auto) {
+            Err(Error::HelpRequested {
+                text,
+                color,
+                root_command,
+            }) => {
+                if root_command && matches!(color, ColorChoice::Auto) {
                     if let Err(err) = print_modal_help_to_stdout(Self::modal_spec(), color) {
                         eprintln!("failed to print help: {err}");
                         println!("{text}");
@@ -166,6 +174,7 @@ pub struct ConfigSpec {
     pub name: &'static str,
     pub about: Option<&'static str>,
     pub fields: &'static [FieldInfo],
+    pub special_options: SpecialOptions,
 }
 
 /// Static description of a config field.
@@ -178,6 +187,7 @@ pub struct FieldInfo {
     pub parser: Parser,
     pub choices: &'static [&'static str],
     pub kind: FieldKind,
+    pub value_type: ValueType,
 }
 
 /// The shape of a config field.
@@ -189,6 +199,24 @@ pub enum FieldKind {
     Subconfig(&'static ConfigSpec),
 }
 
+/// Runtime-reserved CLI options enabled for a config or modal command.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SpecialOptions {
+    /// Enable `--config PATH` in argv parsing and generated help.
+    pub config: bool,
+    /// Enable `--color auto|always|never` in argv parsing and generated help.
+    pub color: bool,
+    /// Enable `--generate-completion SHELL` in argv parsing and generated help.
+    pub completion: bool,
+}
+
+/// Coarse field type metadata used for kwconf-style bool negation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueType {
+    Other,
+    Bool,
+}
+
 /// Static description of a modal enum.
 #[derive(Debug)]
 pub struct ModalSpec {
@@ -196,6 +224,7 @@ pub struct ModalSpec {
     pub about: Option<&'static str>,
     pub variants: &'static [ModalVariantInfo],
     pub default_variant: Option<&'static str>,
+    pub special_options: SpecialOptions,
 }
 
 /// Static description of a modal enum variant.
@@ -321,7 +350,11 @@ impl Default for Sources {
 /// Errors returned by kwconf-rs.
 #[derive(Debug)]
 pub enum Error {
-    HelpRequested { text: String, color: ColorChoice },
+    HelpRequested {
+        text: String,
+        color: ColorChoice,
+        root_command: bool,
+    },
     CompletionRequested(String),
     Io {
         path: PathBuf,
@@ -399,11 +432,14 @@ where
         return Err(Error::HelpRequested {
             text: render_help_with_color(spec, color),
             color,
+            root_command: true,
         });
     }
 
     if let Some(shell) = argv.completion_shell {
-        return Err(Error::CompletionRequested(render_completion(spec, shell, spec.name)));
+        return Err(Error::CompletionRequested(render_completion(
+            spec, shell, spec.name,
+        )));
     }
 
     if let Some(value) = sources.config_value {
@@ -419,7 +455,8 @@ where
     apply_env(spec, &mut root, &sources.env)?;
 
     for (name, value) in argv.values {
-        let path = find_field_path(spec, &name).ok_or_else(|| Error::UnknownArgument(format!("--{name}")))?;
+        let path = find_field_path(spec, &name)
+            .ok_or_else(|| Error::UnknownArgument(format!("--{name}")))?;
         let field = *path.last().expect("field path is non-empty");
         let value = parse_string_value(field, &value, "argv")?;
         apply_choice_path(&path, &value)?;
@@ -435,7 +472,9 @@ where
 {
     match serde_json::to_value(T::default()).map_err(|err| Error::Deserialize(err.to_string()))? {
         Value::Object(map) => Ok(map),
-        _ => Err(Error::Message("config defaults must serialize as an object".to_string())),
+        _ => Err(Error::Message(
+            "config defaults must serialize as an object".to_string(),
+        )),
     }
 }
 
@@ -453,7 +492,9 @@ fn parse_argv(spec: &ConfigSpec, args: &[OsString]) -> Result<ParsedArgv> {
     let mut iter = args.iter().skip(1).peekable();
 
     while let Some(raw) = iter.next() {
-        let arg = raw.to_str().ok_or_else(|| Error::Message("argv contains non-UTF-8 text".to_string()))?;
+        let arg = raw
+            .to_str()
+            .ok_or_else(|| Error::Message("argv contains non-UTF-8 text".to_string()))?;
 
         if arg == "--help" || arg == "-h" {
             parsed.help_requested = true;
@@ -474,18 +515,17 @@ fn parse_argv(spec: &ConfigSpec, args: &[OsString]) -> Result<ParsedArgv> {
         } else {
             let key = body.to_string();
             let value = match iter.peek() {
-                Some(next) if !next.to_string_lossy().starts_with("--") => {
-                    iter.next()
-                        .and_then(|v| v.to_str().map(ToOwned::to_owned))
-                        .ok_or_else(|| Error::Message("argv contains non-UTF-8 text".to_string()))?
-                }
+                Some(next) if !next.to_string_lossy().starts_with("--") => iter
+                    .next()
+                    .and_then(|v| v.to_str().map(ToOwned::to_owned))
+                    .ok_or_else(|| Error::Message("argv contains non-UTF-8 text".to_string()))?,
                 _ => "true".to_string(),
             };
             (key, value)
         };
 
-        let key = normalize_path(&key);
-        if key == "config" {
+        let mut key = normalize_path(&key);
+        if spec.special_options.config && key == "config" {
             if value == "true" {
                 return Err(Error::MissingValue("--config".to_string()));
             }
@@ -493,7 +533,7 @@ fn parse_argv(spec: &ConfigSpec, args: &[OsString]) -> Result<ParsedArgv> {
             continue;
         }
 
-        if key == "generate_completion" {
+        if spec.special_options.completion && key == "generate_completion" {
             if value == "true" {
                 return Err(Error::MissingValue("--generate-completion".to_string()));
             }
@@ -501,11 +541,17 @@ fn parse_argv(spec: &ConfigSpec, args: &[OsString]) -> Result<ParsedArgv> {
             continue;
         }
 
-        if key == "color" {
+        if spec.special_options.color && key == "color" {
             if value == "true" {
                 return Err(Error::MissingValue("--color".to_string()));
             }
             parsed.color_choice = Some(parse_color_choice(&value)?);
+            continue;
+        }
+
+        if let Some(path) = bool_negation_path(spec, &key) {
+            key = path;
+            parsed.values.insert(key, "false".to_string());
             continue;
         }
 
@@ -525,7 +571,9 @@ fn merge_config_object(
     source: &'static str,
 ) -> Result<()> {
     let Value::Object(map) = value else {
-        return Err(Error::Message(format!("{source} must contain an object at the top level")));
+        return Err(Error::Message(format!(
+            "{source} must contain an object at the top level"
+        )));
     };
 
     for (key, value) in map {
@@ -552,7 +600,10 @@ fn merge_config_object(
             }
             FieldKind::Subconfig(child_spec) => {
                 let Value::Object(_) = value else {
-                    return Err(Error::Message(format!("{source} field {} must contain an object", field.name)));
+                    return Err(Error::Message(format!(
+                        "{source} field {} must contain an object",
+                        field.name
+                    )));
                 };
                 let child = ensure_child_object(root, field.name)?;
                 merge_config_object(child_spec, child, value, source)?;
@@ -562,7 +613,11 @@ fn merge_config_object(
     Ok(())
 }
 
-fn apply_env(spec: &ConfigSpec, root: &mut Map<String, Value>, env: &BTreeMap<String, String>) -> Result<()> {
+fn apply_env(
+    spec: &ConfigSpec,
+    root: &mut Map<String, Value>,
+    env: &BTreeMap<String, String>,
+) -> Result<()> {
     let mut paths = Vec::new();
     collect_field_paths(spec, Vec::new(), &mut paths);
     for path in paths {
@@ -578,7 +633,11 @@ fn apply_env(spec: &ConfigSpec, root: &mut Map<String, Value>, env: &BTreeMap<St
     Ok(())
 }
 
-fn collect_field_paths<'a>(spec: &'a ConfigSpec, prefix: Vec<&'a FieldInfo>, out: &mut Vec<Vec<&'a FieldInfo>>) {
+fn collect_field_paths<'a>(
+    spec: &'a ConfigSpec,
+    prefix: Vec<&'a FieldInfo>,
+    out: &mut Vec<Vec<&'a FieldInfo>>,
+) {
     for field in spec.fields {
         let mut path = prefix.clone();
         path.push(field);
@@ -601,13 +660,18 @@ fn set_path_value(root: &mut Map<String, Value>, path: &[&FieldInfo], value: Val
     set_path_value(child, &path[1..], value)
 }
 
-fn ensure_child_object<'a>(root: &'a mut Map<String, Value>, name: &str) -> Result<&'a mut Map<String, Value>> {
+fn ensure_child_object<'a>(
+    root: &'a mut Map<String, Value>,
+    name: &str,
+) -> Result<&'a mut Map<String, Value>> {
     let value = root
         .entry(name.to_string())
         .or_insert_with(|| Value::Object(Map::new()));
     match value {
         Value::Object(map) => Ok(map),
-        _ => Err(Error::Message(format!("field {name} must contain an object"))),
+        _ => Err(Error::Message(format!(
+            "field {name} must contain an object"
+        ))),
     }
 }
 
@@ -618,7 +682,10 @@ fn apply_choice_path(path: &[&FieldInfo], value: &Value) -> Result<()> {
 
 fn find_field_path<'a>(spec: &'a ConfigSpec, key: &str) -> Option<Vec<&'a FieldInfo>> {
     let mut spec = spec;
-    let parts: Vec<String> = normalize_path(key).split('.').map(ToOwned::to_owned).collect();
+    let parts: Vec<String> = normalize_path(key)
+        .split('.')
+        .map(ToOwned::to_owned)
+        .collect();
     let mut path = Vec::new();
     for (index, part) in parts.iter().enumerate() {
         let field = find_field(spec, part)?;
@@ -636,8 +703,26 @@ fn find_field_path<'a>(spec: &'a ConfigSpec, key: &str) -> Option<Vec<&'a FieldI
 fn find_field<'a>(spec: &'a ConfigSpec, key: &str) -> Option<&'a FieldInfo> {
     let key = normalize_key(key);
     spec.fields.iter().find(|field| {
-        normalize_key(field.name) == key || field.aliases.iter().any(|alias| normalize_key(alias) == key)
+        normalize_key(field.name) == key
+            || field
+                .aliases
+                .iter()
+                .any(|alias| normalize_key(alias) == key)
     })
+}
+
+fn bool_negation_path(spec: &ConfigSpec, key: &str) -> Option<String> {
+    let key = normalize_path(key);
+    let stripped = key
+        .strip_prefix("no_")
+        .or_else(|| key.strip_prefix("no-"))?;
+    let path = find_field_path(spec, stripped)?;
+    let field = *path.last().expect("field path is non-empty");
+    if matches!(field.value_type, ValueType::Bool) {
+        Some(stripped.to_string())
+    } else {
+        None
+    }
 }
 
 fn normalize_path(key: &str) -> String {
@@ -658,19 +743,30 @@ fn read_config_file(path: &Path) -> Result<Value> {
         source,
     })?;
 
-    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     match ext.as_str() {
         "toml" => parse_toml_file(&text),
         "json" => serde_json::from_str(&text).map_err(|err| Error::Deserialize(err.to_string())),
-        "yaml" | "yml" => yaml_serde::from_str(&text).map_err(|err| Error::Deserialize(err.to_string())),
+        "yaml" | "yml" => {
+            yaml_serde::from_str(&text).map_err(|err| Error::Deserialize(err.to_string()))
+        }
         _ => parse_toml_file(&text)
-            .or_else(|_| serde_json::from_str(&text).map_err(|err| Error::Deserialize(err.to_string())))
-            .or_else(|_| yaml_serde::from_str(&text).map_err(|err| Error::Deserialize(err.to_string()))),
+            .or_else(|_| {
+                serde_json::from_str(&text).map_err(|err| Error::Deserialize(err.to_string()))
+            })
+            .or_else(|_| {
+                yaml_serde::from_str(&text).map_err(|err| Error::Deserialize(err.to_string()))
+            }),
     }
 }
 
 fn parse_toml_file(text: &str) -> Result<Value> {
-    let value: toml::Value = toml::from_str(text).map_err(|err| Error::Deserialize(err.to_string()))?;
+    let value: toml::Value =
+        toml::from_str(text).map_err(|err| Error::Deserialize(err.to_string()))?;
     serde_json::to_value(value).map_err(|err| Error::Deserialize(err.to_string()))
 }
 
@@ -711,7 +807,9 @@ fn parse_auto(text: &str) -> std::result::Result<Value, String> {
     if let Ok(value) = trimmed.parse::<i64>() {
         return Ok(Value::Number(value.into()));
     }
-    if (trimmed.contains('.') || trimmed.contains('e') || trimmed.contains('E')) && trimmed.parse::<f64>().is_ok() {
+    if (trimmed.contains('.') || trimmed.contains('e') || trimmed.contains('E'))
+        && trimmed.parse::<f64>().is_ok()
+    {
         let value = trimmed.parse::<f64>().map_err(|err| err.to_string())?;
         if let Some(number) = serde_json::Number::from_f64(value) {
             return Ok(Value::Number(number));
@@ -758,7 +856,7 @@ fn apply_choice(field: &FieldInfo, value: &Value) -> Result<()> {
     let Some(text) = value.as_str() else {
         return Ok(());
     };
-    if field.choices.iter().any(|choice| *choice == text) {
+    if field.choices.contains(&text) {
         Ok(())
     } else {
         Err(Error::Choice {
@@ -813,31 +911,43 @@ fn build_command(spec: &ConfigSpec, color: ColorChoice) -> Command {
     build_command_with_name(spec, spec.name, color)
 }
 
-fn build_command_with_name(spec: &ConfigSpec, name: &str, color: ColorChoice) -> Command {
-    let mut cmd = Command::new(name.to_string())
-        .styles(kwconf_help_styles())
-        .color(color)
-        .arg_required_else_help(false)
-        .arg(
+fn add_special_options(mut cmd: Command, special_options: SpecialOptions) -> Command {
+    if special_options.config {
+        cmd = cmd.arg(
             Arg::new("config")
                 .long("config")
                 .value_name("PATH")
                 .help("Read TOML, JSON, YAML, or YML config."),
-        )
-        .arg(
+        );
+    }
+    if special_options.completion {
+        cmd = cmd.arg(
             Arg::new("generate-completion")
                 .long("generate-completion")
                 .value_name("SHELL")
                 .value_parser(clap::value_parser!(Shell))
                 .help("Generate a shell completion script."),
-        )
-        .arg(
+        );
+    }
+    if special_options.color {
+        cmd = cmd.arg(
             Arg::new("color")
                 .long("color")
                 .value_name("WHEN")
                 .value_parser(["auto", "always", "never"])
                 .help("Control help color: auto, always, or never."),
         );
+    }
+    cmd
+}
+
+fn build_command_with_name(spec: &ConfigSpec, name: &str, color: ColorChoice) -> Command {
+    let mut cmd = Command::new(name.to_string())
+        .styles(kwconf_help_styles())
+        .color(color)
+        .arg_required_else_help(false);
+
+    cmd = add_special_options(cmd, spec.special_options);
 
     if let Some(about) = spec.about {
         cmd = cmd.about(about);
@@ -846,19 +956,37 @@ fn build_command_with_name(spec: &ConfigSpec, name: &str, color: ColorChoice) ->
     let mut paths = Vec::new();
     collect_named_field_paths(spec, Vec::new(), &mut paths);
     for (path_name, field) in paths {
+        let long_path = path_name.replace('_', "-");
         let mut arg = Arg::new(path_name.clone())
-            .long(path_name.replace('_', "-"))
+            .long(long_path.clone())
             .value_name("VALUE")
             .action(ArgAction::Set)
             .help(field_help(field));
 
+        if long_path != path_name {
+            arg = arg.visible_alias(path_name.clone());
+        }
+
         for alias in field.aliases {
             let alias_path = replace_leaf_name(&path_name, alias);
-            arg = arg.visible_alias(alias_path.replace('_', "-"));
+            let alias_long = alias_path.replace('_', "-");
+            arg = arg.visible_alias(alias_long.clone());
+            if alias_long != alias_path {
+                arg = arg.visible_alias(alias_path);
+            }
+        }
+
+        if matches!(field.value_type, ValueType::Bool) {
+            arg = arg.visible_alias(format!("no-{}", long_path));
+            if long_path != path_name {
+                arg = arg.visible_alias(format!("no-{}", path_name));
+            }
         }
 
         if !field.choices.is_empty() {
-            arg = arg.value_parser(clap::builder::PossibleValuesParser::new(field.choices.iter().copied()));
+            arg = arg.value_parser(clap::builder::PossibleValuesParser::new(
+                field.choices.iter().copied(),
+            ));
         }
 
         cmd = cmd.arg(arg);
@@ -867,7 +995,11 @@ fn build_command_with_name(spec: &ConfigSpec, name: &str, color: ColorChoice) ->
     cmd
 }
 
-fn collect_named_field_paths<'a>(spec: &'a ConfigSpec, prefix: Vec<String>, out: &mut Vec<(String, &'a FieldInfo)>) {
+fn collect_named_field_paths<'a>(
+    spec: &'a ConfigSpec,
+    prefix: Vec<String>,
+    out: &mut Vec<(String, &'a FieldInfo)>,
+) {
     for field in spec.fields {
         let mut path = prefix.clone();
         path.push(field.name.to_string());
@@ -912,7 +1044,10 @@ pub struct ModalSelection {
 
 /// Resolve modal sources into one variant and child sources.
 #[doc(hidden)]
-pub fn resolve_modal_selection(spec: &'static ModalSpec, sources: Sources) -> Result<ModalSelection> {
+pub fn resolve_modal_selection(
+    spec: &'static ModalSpec,
+    sources: Sources,
+) -> Result<ModalSelection> {
     let parsed = parse_modal_argv(spec, &sources.args)?;
 
     if parsed.help_requested {
@@ -920,14 +1055,20 @@ pub fn resolve_modal_selection(spec: &'static ModalSpec, sources: Sources) -> Re
         return Err(Error::HelpRequested {
             text: render_modal_help_with_color(spec, color),
             color,
+            root_command: true,
         });
     }
 
     if let Some(shell) = parsed.completion_shell {
-        return Err(Error::CompletionRequested(render_modal_completion(spec, shell, spec.name)));
+        return Err(Error::CompletionRequested(render_modal_completion(
+            spec, shell, spec.name,
+        )));
     }
 
-    let config_path = parsed.config_path.clone().or_else(|| sources.config_path.clone());
+    let config_path = parsed
+        .config_path
+        .clone()
+        .or_else(|| sources.config_path.clone());
     let config_value = if let Some(value) = sources.config_value.clone() {
         Some(value)
     } else if let Some(path) = config_path.as_ref() {
@@ -950,9 +1091,12 @@ pub fn resolve_modal_selection(spec: &'static ModalSpec, sources: Sources) -> Re
     };
 
     let mut child_sources = sources.clone();
-    child_sources.args = parsed.child_args.unwrap_or_else(|| vec![OsString::from(variant_name)]);
+    child_sources.args = parsed
+        .child_args
+        .unwrap_or_else(|| vec![OsString::from(variant_name)]);
     child_sources.config_path = None;
-    child_sources.config_value = config_value.and_then(|value| modal_child_config_value(spec, variant_name, value));
+    child_sources.config_value =
+        config_value.and_then(|value| modal_child_config_value(spec, variant_name, value));
 
     Ok(ModalSelection {
         variant: variant_name,
@@ -979,7 +1123,9 @@ fn parse_modal_argv(spec: &ModalSpec, args: &[OsString]) -> Result<ParsedModalAr
     let mut iter = args.iter().skip(1).peekable();
 
     while let Some(raw) = iter.next() {
-        let arg = raw.to_str().ok_or_else(|| Error::Message("argv contains non-UTF-8 text".to_string()))?;
+        let arg = raw
+            .to_str()
+            .ok_or_else(|| Error::Message("argv contains non-UTF-8 text".to_string()))?;
 
         if arg == "--help" || arg == "-h" {
             parsed.help_requested = true;
@@ -990,38 +1136,38 @@ fn parse_modal_argv(spec: &ModalSpec, args: &[OsString]) -> Result<ParsedModalAr
             break;
         }
 
-        if arg.starts_with("--") {
-            let body = &arg[2..];
+        if let Some(body) = arg.strip_prefix("--") {
             let (key, value) = if let Some((key, value)) = body.split_once('=') {
                 (key.to_string(), value.to_string())
             } else {
                 let key = body.to_string();
                 let value = match iter.peek() {
-                    Some(next) if !next.to_string_lossy().starts_with("--") => {
-                        iter.next()
-                            .and_then(|v| v.to_str().map(ToOwned::to_owned))
-                            .ok_or_else(|| Error::Message("argv contains non-UTF-8 text".to_string()))?
-                    }
+                    Some(next) if !next.to_string_lossy().starts_with("--") => iter
+                        .next()
+                        .and_then(|v| v.to_str().map(ToOwned::to_owned))
+                        .ok_or_else(|| {
+                            Error::Message("argv contains non-UTF-8 text".to_string())
+                        })?,
                     _ => "true".to_string(),
                 };
                 (key, value)
             };
             let key = normalize_key(&key);
-            if key == "config" {
+            if spec.special_options.config && key == "config" {
                 if value == "true" {
                     return Err(Error::MissingValue("--config".to_string()));
                 }
                 parsed.config_path = Some(PathBuf::from(value));
                 continue;
             }
-            if key == "generate_completion" {
+            if spec.special_options.completion && key == "generate_completion" {
                 if value == "true" {
                     return Err(Error::MissingValue("--generate-completion".to_string()));
                 }
                 parsed.completion_shell = Some(parse_shell(&value)?);
                 continue;
             }
-            if key == "color" {
+            if spec.special_options.color && key == "color" {
                 if value == "true" {
                     return Err(Error::MissingValue("--color".to_string()));
                 }
@@ -1033,7 +1179,11 @@ fn parse_modal_argv(spec: &ModalSpec, args: &[OsString]) -> Result<ParsedModalAr
 
         let variant = canonical_modal_variant(spec, arg)?.name.to_string();
         let mut child_args = Vec::new();
-        child_args.push(OsString::from(format!("{} {}", program.to_string_lossy(), variant)));
+        child_args.push(OsString::from(format!(
+            "{} {}",
+            program.to_string_lossy(),
+            variant
+        )));
         for item in iter {
             child_args.push(item.clone());
         }
@@ -1050,7 +1200,11 @@ fn canonical_modal_variant<'a>(spec: &'a ModalSpec, name: &str) -> Result<&'a Mo
     spec.variants
         .iter()
         .find(|variant| {
-            normalize_key(variant.name) == key || variant.aliases.iter().any(|alias| normalize_key(alias) == key)
+            normalize_key(variant.name) == key
+                || variant
+                    .aliases
+                    .iter()
+                    .any(|alias| normalize_key(alias) == key)
         })
         .ok_or_else(|| Error::InvalidModalVariant(name.to_string()))
 }
@@ -1136,27 +1290,9 @@ fn build_modal_command(spec: &ModalSpec, color: ColorChoice) -> Command {
         .styles(kwconf_help_styles())
         .color(color)
         .arg_required_else_help(false)
-        .subcommand_required(false)
-        .arg(
-            Arg::new("config")
-                .long("config")
-                .value_name("PATH")
-                .help("Read TOML, JSON, YAML, or YML config."),
-        )
-        .arg(
-            Arg::new("generate-completion")
-                .long("generate-completion")
-                .value_name("SHELL")
-                .value_parser(clap::value_parser!(Shell))
-                .help("Generate a shell completion script."),
-        )
-        .arg(
-            Arg::new("color")
-                .long("color")
-                .value_name("WHEN")
-                .value_parser(["auto", "always", "never"])
-                .help("Control help color: auto, always, or never."),
-        );
+        .subcommand_required(false);
+
+    cmd = add_special_options(cmd, spec.special_options);
 
     if let Some(about) = spec.about {
         cmd = cmd.about(about);
@@ -1184,7 +1320,10 @@ mod tests {
     fn auto_parser_handles_basic_scalars() {
         assert_eq!(parse_auto("true").unwrap(), Value::Bool(true));
         assert_eq!(parse_auto("3").unwrap(), Value::Number(3.into()));
-        assert_eq!(parse_auto("word").unwrap(), Value::String("word".to_string()));
+        assert_eq!(
+            parse_auto("word").unwrap(),
+            Value::String("word".to_string())
+        );
     }
 
     #[test]
@@ -1207,8 +1346,17 @@ mod tests {
 
     #[test]
     fn color_parser_accepts_common_names() {
-        assert!(matches!(parse_color_choice("auto").unwrap(), ColorChoice::Auto));
-        assert!(matches!(parse_color_choice("always").unwrap(), ColorChoice::Always));
-        assert!(matches!(parse_color_choice("never").unwrap(), ColorChoice::Never));
+        assert!(matches!(
+            parse_color_choice("auto").unwrap(),
+            ColorChoice::Auto
+        ));
+        assert!(matches!(
+            parse_color_choice("always").unwrap(),
+            ColorChoice::Always
+        ));
+        assert!(matches!(
+            parse_color_choice("never").unwrap(),
+            ColorChoice::Never
+        ));
     }
 }

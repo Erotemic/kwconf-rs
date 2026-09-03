@@ -169,7 +169,7 @@ Rust kwconf-rs uses `clap` help rendering with an explicit style palette:
 let help = TrainConfig::help_with_color(kwconf::ColorChoice::Auto);
 ```
 
-The CLI also accepts:
+The CLI accepts this when the config opts in with `#[kwconf(special_options(color))]`:
 
 ```bash
 train --color always --help
@@ -183,7 +183,7 @@ snapshots or `Always` to assert ANSI output.
 
 Python kwconf can use `argcomplete` when it is installed.
 
-Rust kwconf-rs emits completion scripts:
+Rust kwconf-rs emits completion scripts. The CLI flag is opt-in via `#[kwconf(special_options(generate_completion))]`:
 
 ```bash
 train --generate-completion bash > train.bash

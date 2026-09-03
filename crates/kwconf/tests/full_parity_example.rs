@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "dataset")]
+#[kwconf(name = "dataset", special_options(config, color, generate_completion))]
 struct DatasetConfig {
     #[kwconf(default = "data/images")]
     root: String,
@@ -19,7 +19,7 @@ struct DatasetConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "model")]
+#[kwconf(name = "model", special_options(config, color, generate_completion))]
 struct ModelConfig {
     #[kwconf(default = "resnet", choices = ["resnet", "unet"])]
     arch: String,
@@ -32,7 +32,10 @@ struct ModelConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "optimizer")]
+#[kwconf(
+    name = "optimizer",
+    special_options(config, color, generate_completion)
+)]
 struct OptimizerConfig {
     #[kwconf(default = 0.001)]
     lr: f64,
@@ -45,7 +48,7 @@ struct OptimizerConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "logging")]
+#[kwconf(name = "logging", special_options(config, color, generate_completion))]
 struct LoggingConfig {
     #[kwconf(default = "INFO", choices = ["DEBUG", "INFO", "WARNING"])]
     level: String,
@@ -58,7 +61,11 @@ struct LoggingConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "train")]
+#[kwconf(
+    name = "train",
+    about = "Train with nested configs and parser-aware string inputs.",
+    special_options(config, color, generate_completion)
+)]
 struct TrainConfig {
     #[kwconf(default = "local", alias = "preset", choices = ["local", "debug", "cluster"])]
     profile: String,
@@ -80,7 +87,7 @@ struct TrainConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "eval")]
+#[kwconf(name = "eval", special_options(config, color, generate_completion))]
 struct EvalConfig {
     #[kwconf(default = "runs/latest/checkpoint.pt")]
     checkpoint: String,
@@ -99,7 +106,7 @@ struct EvalConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "export")]
+#[kwconf(name = "export", special_options(config, color, generate_completion))]
 struct ExportConfig {
     #[kwconf(default = "runs/latest/checkpoint.pt")]
     checkpoint: String,
@@ -118,7 +125,10 @@ struct ExportConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, kwconf::ModalConfig)]
-#[kwconf(name = "kwconf-parity")]
+#[kwconf(
+    name = "kwconf-parity",
+    special_options(config, color, generate_completion)
+)]
 enum KwconfParityApp {
     #[kwconf(default, alias = "fit")]
     Train(TrainConfig),
@@ -130,7 +140,9 @@ enum KwconfParityApp {
 }
 
 fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/parity_full").join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/parity_full")
+        .join(name)
 }
 
 #[test]
@@ -152,12 +164,21 @@ fn full_train_demo_uses_shared_yaml_and_nested_cli_overrides() {
         KwconfParityApp::Train(cfg) => {
             assert_eq!(cfg.profile, "debug");
             assert_eq!(cfg.dataset.root, "data/train-images");
-            assert_eq!(cfg.dataset.cache, true);
+            assert!(cfg.dataset.cache);
             assert_eq!(cfg.optimizer.lr, 0.02);
-            assert_eq!(cfg.logging.tags, vec!["cli".to_string(), "side".to_string()]);
-            assert_eq!(cfg.logging.metadata.get("owner").unwrap(), &serde_json::json!("cli"));
-            assert_eq!(cfg.logging.metadata.get("priority").unwrap(), &serde_json::json!(2));
-            assert_eq!(cfg.dry_run, true);
+            assert_eq!(
+                cfg.logging.tags,
+                vec!["cli".to_string(), "side".to_string()]
+            );
+            assert_eq!(
+                cfg.logging.metadata.get("owner").unwrap(),
+                &serde_json::json!("cli")
+            );
+            assert_eq!(
+                cfg.logging.metadata.get("priority").unwrap(),
+                &serde_json::json!(2)
+            );
+            assert!(cfg.dry_run);
         }
         other => panic!("expected train variant, got {other:?}"),
     }
@@ -180,7 +201,10 @@ fn full_demo_modal_alias_and_eval_config_work() {
         KwconfParityApp::Eval(cfg) => {
             assert_eq!(cfg.checkpoint, "runs/debug/checkpoint.pt");
             assert_eq!(cfg.dataset.split, "val");
-            assert_eq!(cfg.metrics, vec!["accuracy".to_string(), "f1".to_string(), "auc".to_string()]);
+            assert_eq!(
+                cfg.metrics,
+                vec!["accuracy".to_string(), "f1".to_string(), "auc".to_string()]
+            );
             assert_eq!(cfg.threshold, 0.91);
         }
         other => panic!("expected eval variant, got {other:?}"),
@@ -228,4 +252,69 @@ fn full_demo_help_mentions_modal_aliases_nested_fields_and_parsers() {
     assert!(child_help.contains("--logging.metadata"));
     assert!(child_help.contains("parser=csv"));
     assert!(child_help.contains("parser=yaml"));
+}
+
+#[test]
+fn modal_subcommand_help_matches_kwconf_style_landmarks() {
+    let err = KwconfParityApp::from_iter(["kwconf-parity", "train", "--help"]).unwrap_err();
+    let help = err.to_string();
+
+    assert!(help.contains("Train with nested configs"));
+    assert!(help.contains("--profile"));
+    assert!(help.contains("--preset"));
+    assert!(help.contains("--dataset.root"));
+    assert!(help.contains("--dataset.split"));
+    assert!(help.contains("--dataset.channels"));
+    assert!(help.contains("--dataset.cache"));
+    assert!(help.contains("--model.arch"));
+    assert!(help.contains("--model.depth"));
+    assert!(help.contains("--model.pretrained"));
+    assert!(help.contains("--no-model.pretrained"));
+    assert!(help.contains("--optimizer.lr"));
+    assert!(help.contains("--optimizer.weight-decay"));
+    assert!(help.contains("--optimizer.weight_decay"));
+    assert!(help.contains("--optimizer.scheduler"));
+    assert!(help.contains("--logging.level"));
+    assert!(help.contains("--logging.tags"));
+    assert!(help.contains("--logging.metadata"));
+    assert!(help.contains("--dry-run"));
+    assert!(help.contains("--dry_run"));
+    assert!(help.contains("--dry"));
+    assert!(help.contains("--config"));
+
+    assert!(!help.contains("Commands:"), "subcommand help should show the selected command fields, not only root modal commands:\n{help}");
+}
+
+#[test]
+fn root_modal_help_stays_modal_and_points_to_subcommands() {
+    let help = KwconfParityApp::help_with_color(kwconf::ColorChoice::Never);
+    assert!(help.contains("Commands:"));
+    assert!(help.contains("train"));
+    assert!(help.contains("eval"));
+    assert!(help.contains("export"));
+    assert!(help.contains("fit"));
+    assert!(help.contains("score"));
+    assert!(!help.contains("--optimizer.lr"));
+}
+
+#[test]
+fn bool_negation_aliases_match_kwconf_help_and_parse_contract() {
+    let train_yaml = fixture("train.yaml");
+    let sources = kwconf::Sources::empty().with_args([
+        "kwconf-parity".to_string(),
+        "train".to_string(),
+        "--config".to_string(),
+        train_yaml.display().to_string(),
+        "--no-model.pretrained".to_string(),
+        "--no-dataset.cache".to_string(),
+    ]);
+
+    let command = KwconfParityApp::from_sources(sources).unwrap();
+    match command {
+        KwconfParityApp::Train(cfg) => {
+            assert!(!cfg.model.pretrained);
+            assert!(!cfg.dataset.cache);
+        }
+        other => panic!("expected train variant, got {other:?}"),
+    }
 }

@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "optimizer", about = "Optimizer settings.")]
+#[kwconf(
+    name = "optimizer",
+    about = "Optimizer settings.",
+    special_options(config, color, generate_completion)
+)]
 struct OptimizerConfig {
     #[kwconf(default = 0.001, help = "Learning rate.")]
     lr: f64,
@@ -11,7 +15,11 @@ struct OptimizerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "nested", about = "Nested config demo.")]
+#[kwconf(
+    name = "nested",
+    about = "Nested config demo.",
+    special_options(config, color, generate_completion)
+)]
 struct JobConfig {
     #[kwconf(default = 64, help = "Image width.")]
     width: usize,

@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "train", about = "Train a model.")]
+#[kwconf(
+    name = "train",
+    about = "Train a model.",
+    special_options(config, color, generate_completion)
+)]
 struct TrainConfig {
     #[kwconf(default = 0.001, help = "Learning rate.")]
     lr: f64,

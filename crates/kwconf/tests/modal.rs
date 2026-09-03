@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "train", about = "Train a model.")]
+#[kwconf(
+    name = "train",
+    about = "Train a model.",
+    special_options(config, color, generate_completion)
+)]
 struct TrainConfig {
     #[kwconf(default = 0.001, help = "Learning rate.")]
     lr: f64,
@@ -12,7 +16,11 @@ struct TrainConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "eval", about = "Evaluate a model.")]
+#[kwconf(
+    name = "eval",
+    about = "Evaluate a model.",
+    special_options(config, color, generate_completion)
+)]
 struct EvalConfig {
     #[kwconf(default = "val", help = "Dataset split.")]
     split: String,
@@ -22,7 +30,11 @@ struct EvalConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, kwconf::ModalConfig)]
-#[kwconf(name = "kwtool", about = "Demo modal CLI.")]
+#[kwconf(
+    name = "kwtool",
+    about = "Demo modal CLI.",
+    special_options(config, color, generate_completion)
+)]
 enum KwTool {
     #[kwconf(default, help = "Run training.")]
     Train(TrainConfig),
@@ -56,13 +68,21 @@ fn modal_config_file_selects_variant_and_child_table() {
     )
     .unwrap();
 
-    let cmd = KwTool::from_iter(["kwtool".to_string(), "--config".to_string(), path.display().to_string()]).unwrap();
+    let cmd = KwTool::from_iter([
+        "kwtool".to_string(),
+        "--config".to_string(),
+        path.display().to_string(),
+    ])
+    .unwrap();
     match cmd {
         KwTool::Eval(cfg) => {
-            assert_eq!(serde_json::to_value(cfg).unwrap(), json!({
-                "split": "test",
-                "threshold": 0.9,
-            }));
+            assert_eq!(
+                serde_json::to_value(cfg).unwrap(),
+                json!({
+                    "split": "test",
+                    "threshold": 0.9,
+                })
+            );
         }
         KwTool::Train(_) => panic!("expected eval variant"),
     }
@@ -77,7 +97,11 @@ fn modal_env_and_argv_override_config() {
         std::process::id(),
         line!()
     ));
-    std::fs::write(&path, "command = 'train'\n[train]\nlr = 0.1\ntags = ['file']\n").unwrap();
+    std::fs::write(
+        &path,
+        "command = 'train'\n[train]\nlr = 0.1\ntags = ['file']\n",
+    )
+    .unwrap();
 
     let sources = kwconf::Sources::empty()
         .with_args([
@@ -108,7 +132,9 @@ fn modal_help_completion_and_child_help_work() {
     assert!(help.contains("eval"));
     assert!(help.contains("--config"));
 
-    let child_help = KwTool::from_iter(["kwtool", "train", "--help"]).unwrap_err().to_string();
+    let child_help = KwTool::from_iter(["kwtool", "train", "--help"])
+        .unwrap_err()
+        .to_string();
     assert!(child_help.contains("--lr"));
     assert!(child_help.contains("--tags"));
 

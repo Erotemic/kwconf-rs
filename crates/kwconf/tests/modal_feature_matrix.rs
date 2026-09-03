@@ -17,7 +17,11 @@ fn temp_config(ext: &str, body: &str) -> PathBuf {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "train", about = "Train a model.")]
+#[kwconf(
+    name = "train",
+    about = "Train a model.",
+    special_options(config, color, generate_completion)
+)]
 struct TrainCommand {
     #[kwconf(default = 0.001, env = "KW_MODAL_TRAIN_LR", help = "Learning rate.")]
     lr: f64,
@@ -30,15 +34,27 @@ struct TrainCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "eval", about = "Evaluate a model.")]
+#[kwconf(
+    name = "eval",
+    about = "Evaluate a model.",
+    special_options(config, color, generate_completion)
+)]
 struct EvalCommand {
     #[kwconf(default = "val", choices = ["val", "test", "holdout"], help = "Dataset split.")]
     split: String,
 
-    #[kwconf(default = 0.5, env = "KW_MODAL_EVAL_THRESHOLD", help = "Decision threshold.")]
+    #[kwconf(
+        default = 0.5,
+        env = "KW_MODAL_EVAL_THRESHOLD",
+        help = "Decision threshold."
+    )]
     threshold: f64,
 
-    #[kwconf(parser = "csv", env = "KW_MODAL_EVAL_METRICS", help = "Evaluation metrics.")]
+    #[kwconf(
+        parser = "csv",
+        env = "KW_MODAL_EVAL_METRICS",
+        help = "Evaluation metrics."
+    )]
     metrics: Vec<String>,
 
     #[kwconf(env = "KW_MODAL_EVAL_REPORT", help = "Structured report options.")]
@@ -46,7 +62,11 @@ struct EvalCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, kwconf::ModalConfig)]
-#[kwconf(name = "kwtool", about = "Exercise modal kwconf-rs behavior.")]
+#[kwconf(
+    name = "kwtool",
+    about = "Exercise modal kwconf-rs behavior.",
+    special_options(config, color, generate_completion)
+)]
 enum KwTool {
     #[kwconf(default, alias = "fit", help = "Run training.")]
     Train(TrainCommand),
@@ -78,8 +98,7 @@ fn modal_default_variant_is_used_when_no_command_or_config_selects_one() {
 
 #[test]
 fn modal_cli_selects_variants_by_name_or_alias_and_passes_child_args_through() {
-    let train = parse_tool(["kwtool", "fit", "--lr=0.2", "--tags=cli,tag", "--depth=34"])
-        .unwrap();
+    let train = parse_tool(["kwtool", "fit", "--lr=0.2", "--tags=cli,tag", "--depth=34"]).unwrap();
     match train {
         KwTool::Train(cfg) => {
             assert_eq!(cfg.lr, 0.2);
@@ -124,12 +143,20 @@ report = { source = 'alias-table' }
 "#,
     );
 
-    let cmd = parse_tool(["kwtool".to_string(), "--config".to_string(), path.display().to_string()]).unwrap();
+    let cmd = parse_tool([
+        "kwtool".to_string(),
+        "--config".to_string(),
+        path.display().to_string(),
+    ])
+    .unwrap();
     match cmd {
         KwTool::Eval(cfg) => {
             assert_eq!(cfg.split, "holdout");
             assert_eq!(cfg.threshold, 0.7);
-            assert_eq!(cfg.metrics, vec!["file-acc".to_string(), "file-f1".to_string()]);
+            assert_eq!(
+                cfg.metrics,
+                vec!["file-acc".to_string(), "file-f1".to_string()]
+            );
             assert_eq!(cfg.report, json!({"source": "alias-table"}));
         }
         KwTool::Train(_) => panic!("expected eval variant from command alias"),
@@ -145,7 +172,12 @@ fn modal_config_can_be_flat_for_the_selected_variant() {
         "command: eval-model\nsplit: test\nthreshold: 0.6\nmetrics: [flat, yaml]\nreport:\n  source: flat\n",
     );
 
-    let cmd = parse_tool(["kwtool".to_string(), "--config".to_string(), path.display().to_string()]).unwrap();
+    let cmd = parse_tool([
+        "kwtool".to_string(),
+        "--config".to_string(),
+        path.display().to_string(),
+    ])
+    .unwrap();
     match cmd {
         KwTool::Eval(cfg) => {
             assert_eq!(cfg.split, "test");
@@ -166,7 +198,12 @@ fn modal_config_mode_field_is_also_accepted_as_the_selector() {
         r#"{"mode":"train","lr":0.4,"tags":["json"],"model_depth":50}"#,
     );
 
-    let cmd = parse_tool(["kwtool".to_string(), "--config".to_string(), path.display().to_string()]).unwrap();
+    let cmd = parse_tool([
+        "kwtool".to_string(),
+        "--config".to_string(),
+        path.display().to_string(),
+    ])
+    .unwrap();
     match cmd {
         KwTool::Train(cfg) => {
             assert_eq!(cfg.lr, 0.4);
@@ -212,7 +249,10 @@ threshold = 0.2
         KwTool::Train(cfg) => {
             assert_eq!(cfg.lr, 0.3, "child argv wins over selected child table");
             assert_eq!(cfg.tags, vec!["env".to_string(), "tag".to_string()]);
-            assert_eq!(cfg.model_depth, 20, "selected child table still contributes values");
+            assert_eq!(
+                cfg.model_depth, 20,
+                "selected child table still contributes values"
+            );
         }
         KwTool::Eval(_) => panic!("CLI subcommand should override file command"),
     }
@@ -256,5 +296,7 @@ fn modal_reports_invalid_variants_and_reserved_flag_errors() {
     assert!(bad_shell.to_string().contains("invalid completion shell"));
 
     let missing_config = parse_tool(["kwtool", "--config"]).unwrap_err();
-    assert!(missing_config.to_string().contains("missing value for --config"));
+    assert!(missing_config
+        .to_string()
+        .contains("missing value for --config"));
 }

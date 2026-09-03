@@ -28,10 +28,12 @@ cargo build -p kwconf --example kwconf_rs_full_app
 ```
 
 Run the Rust test suite, including tests that exercise the same fixtures used by
-this demo:
+this demo and tests that check the Rust help surface against the Python kwconf
+landmarks:
 
 ```bash
 cargo test -p kwconf --test full_parity_example
+cargo test -p kwconf --test reserved_options
 ```
 
 ## Prepare the Python example
@@ -64,8 +66,12 @@ cargo run -p kwconf --example kwconf_rs_full_app -- train --help
 ```
 
 Look for the same conceptual surfaces: nested `dataset.*`, `model.*`,
-`optimizer.*`, `logging.*` flags, parser hints for csv/yaml fields, and modal
-aliases.
+`optimizer.*`, `logging.*` flags, parser hints for csv/yaml fields, boolean
+negation such as `--no-model.pretrained`, and modal aliases.
+
+The Rust test `modal_subcommand_help_matches_kwconf_style_landmarks` locks down
+these visible help landmarks so `train --help` keeps showing the selected command
+fields rather than falling back to root modal help.
 
 ## Run train side by side
 
@@ -176,5 +182,9 @@ cargo run -p kwconf --example kwconf_rs_full_app -- train --color always --help
 ```
 
 The Python side uses rich argparse formatting when the optional Python extras are
-installed and enabled. The Rust side uses clap styling and `--color` to make the
-behavior explicit and testable.
+installed and enabled. The Rust side uses clap styling and an opt-in `--color`
+special option to make the behavior explicit and testable.
+
+`--color` and `--generate-completion` are not reserved by default in `kwconf-rs`.
+The parity demo enables them explicitly with `#[kwconf(special_options(...))]`,
+which mirrors the Python-side move toward opt-in special options.

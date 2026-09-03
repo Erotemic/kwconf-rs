@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "basic", about = "Small kwconf-rs demo.")]
+#[kwconf(
+    name = "basic",
+    about = "Small kwconf-rs demo.",
+    special_options(config, color, generate_completion)
+)]
 struct BasicConfig {
     #[kwconf(default = 0.001, help = "Learning rate.")]
     lr: f64,

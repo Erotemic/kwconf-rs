@@ -20,7 +20,7 @@ Fields without an explicit default use `Default::default()`.
 
 ## Config files
 
-`--config PATH` loads a structured file before env and argv.
+When enabled with `#[kwconf(special_options(config))]`, `--config PATH` loads a structured file before env and argv. Programmatic callers can still pass a config path through `Sources` without enabling the CLI flag.
 
 Supported file extensions:
 
@@ -88,8 +88,17 @@ Modal subcommands use the normal command shape:
 kwtool train --lr=0.02
 ```
 
-`--config`, `--help`, `--color`, and `--generate-completion` are reserved by the runtime.
-For modal CLIs, put global flags before the subcommand and subcommand fields after it.
+`--help` is always handled by the runtime. Other runtime flags are opt-in so applications can still use ordinary fields named `config`, `color`, or `generate_completion` when they want to.
+
+```rust
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, kwconf::Config)]
+#[kwconf(name = "train", special_options(config, color, generate_completion))]
+struct TrainConfig {
+    // ...
+}
+```
+
+For modal CLIs, root runtime flags go before the subcommand. If the selected subcommand config also enables a runtime flag, that flag can appear after the subcommand with the rest of the subcommand fields.
 
 ## Parsers
 
@@ -176,10 +185,10 @@ The default variant is used when argv and config do not select one.
 
 - `Config::help()` renders normal help.
 - `ModalConfig::help()` renders modal help.
-- `--color auto|always|never` controls color for CLI help.
-- `help_with_color(...)` renders help with an explicit color policy.
-- `--generate-completion SHELL` prints a completion script.
-- `completion_script(...)` returns the script as a string.
+- `--color auto|always|never` controls color for CLI help when `special_options(color)` is enabled.
+- `help_with_color(...)` renders help with an explicit color policy without requiring the CLI flag.
+- `--generate-completion SHELL` prints a completion script when `special_options(generate_completion)` is enabled.
+- `completion_script(...)` returns the script as a string without requiring the CLI flag.
 
 Supported completion shells are `bash`, `elvish`, `fish`, `powershell`, and
 `zsh`.

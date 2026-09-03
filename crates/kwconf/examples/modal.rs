@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "train", about = "Train a model.")]
+#[kwconf(
+    name = "train",
+    about = "Train a model.",
+    special_options(config, color, generate_completion)
+)]
 struct TrainConfig {
     #[kwconf(default = 0.001, help = "Learning rate.")]
     lr: f64,
@@ -11,7 +15,11 @@ struct TrainConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "eval", about = "Evaluate a model.")]
+#[kwconf(
+    name = "eval",
+    about = "Evaluate a model.",
+    special_options(config, color, generate_completion)
+)]
 struct EvalConfig {
     #[kwconf(default = "val", help = "Dataset split.")]
     split: String,
@@ -21,7 +29,11 @@ struct EvalConfig {
 }
 
 #[derive(Debug, Clone, kwconf::ModalConfig)]
-#[kwconf(name = "kwtool", about = "Modal CLI demo.")]
+#[kwconf(
+    name = "kwtool",
+    about = "Modal CLI demo.",
+    special_options(config, color, generate_completion)
+)]
 enum KwTool {
     #[kwconf(default, help = "Run training.")]
     Train(TrainConfig),

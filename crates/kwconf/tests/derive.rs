@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "demo", about = "Demo config.")]
+#[kwconf(
+    name = "demo",
+    about = "Demo config.",
+    special_options(config, color, generate_completion)
+)]
 struct DemoConfig {
     #[kwconf(default = 1, help = "Image width.")]
     width: usize,
@@ -73,7 +77,11 @@ fn help_is_available() {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "optimizer", about = "Optimizer config.")]
+#[kwconf(
+    name = "optimizer",
+    about = "Optimizer config.",
+    special_options(config, color, generate_completion)
+)]
 struct OptimizerConfig {
     #[kwconf(default = 0.001, help = "Learning rate.")]
     lr: f64,
@@ -86,7 +94,11 @@ struct OptimizerConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "nested-demo", about = "Nested config demo.")]
+#[kwconf(
+    name = "nested-demo",
+    about = "Nested config demo.",
+    special_options(config, color, generate_completion)
+)]
 struct NestedConfig {
     #[kwconf(default = 64, help = "Image width.")]
     width: usize,
@@ -138,7 +150,10 @@ fn nested_subconfig_merges_file_env_and_argv() {
     assert_eq!(cfg.width, 96);
     assert_eq!(cfg.optimizer.lr, 0.04);
     assert_eq!(cfg.optimizer.kind, "sgd");
-    assert_eq!(cfg.optimizer.tags, vec!["env".to_string(), "tag".to_string()]);
+    assert_eq!(
+        cfg.optimizer.tags,
+        vec!["env".to_string(), "tag".to_string()]
+    );
 
     let _ = std::fs::remove_file(path);
 }

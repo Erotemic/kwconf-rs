@@ -3,18 +3,17 @@ use serde_json::json;
 use std::path::PathBuf;
 
 fn parity_train_toml() -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/parity/train.toml");
-    assert!(
-        path.exists(),
-        "missing parity fixture: {}",
-        path.display()
-    );
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/parity/train.toml");
+    assert!(path.exists(), "missing parity fixture: {}", path.display());
     path.display().to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, kwconf::Config)]
-#[kwconf(name = "train", about = "Train a model.")]
+#[kwconf(
+    name = "train",
+    about = "Train a model.",
+    special_options(config, color, generate_completion)
+)]
 struct TrainConfig {
     #[kwconf(default = 0.001, help = "Learning rate.")]
     lr: f64,
@@ -90,12 +89,18 @@ fn generated_help_and_completion_cover_demo_fields() {
 #[test]
 fn forced_color_help_contains_ansi_styles() {
     let help = TrainConfig::help_with_color(kwconf::ColorChoice::Always);
-    assert!(help.contains("\x1b["), "forced color help should contain ANSI escapes: {help:?}");
+    assert!(
+        help.contains("\x1b["),
+        "forced color help should contain ANSI escapes: {help:?}"
+    );
     assert!(help.contains("--lr"));
 
     let err = TrainConfig::from_iter(["train", "--color", "always", "--help"]).unwrap_err();
     let text = err.to_string();
-    assert!(text.contains("\x1b["), "--color always --help should contain ANSI escapes: {text:?}");
+    assert!(
+        text.contains("\x1b["),
+        "--color always --help should contain ANSI escapes: {text:?}"
+    );
     assert!(text.contains("--tags"));
 }
 

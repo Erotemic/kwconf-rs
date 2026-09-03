@@ -85,6 +85,11 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         } else {
             quote! { ::kwconf::FieldKind::Value }
         };
+        let value_type = if is_bool_type(&field_ty) {
+            quote! { ::kwconf::ValueType::Bool }
+        } else {
+            quote! { ::kwconf::ValueType::Other }
+        };
 
         infos.push(quote! {
             ::kwconf::FieldInfo {
@@ -95,12 +100,14 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 parser: #parser,
                 choices: &[#(#choice_lits),*],
                 kind: #kind,
+                value_type: #value_type,
             }
         });
     }
 
     let spec_name = struct_opts.name.unwrap_or_else(|| ident.to_string());
     let spec_about = option_lit(struct_opts.about.as_deref());
+    let special_options = struct_opts.special_options.to_tokens();
     Ok(quote! {
         impl ::core::default::Default for #ident {
             fn default() -> Self {
@@ -123,6 +130,7 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                         name: #spec_name,
                         about: #spec_about,
                         fields,
+                        special_options: #special_options,
                     }
                 })
             }
@@ -186,7 +194,9 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
     for variant in variants {
         let variant_ident = variant.ident;
         let opts = VariantOpts::from_attrs(&variant.attrs)?;
-        let variant_name = opts.name.unwrap_or_else(|| to_kebab_case(&variant_ident.to_string()));
+        let variant_name = opts
+            .name
+            .unwrap_or_else(|| to_kebab_case(&variant_ident.to_string()));
         if opts.default {
             if default_variant.is_some() {
                 return Err(syn::Error::new_spanned(
@@ -198,7 +208,9 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
         }
 
         let inner_ty = match variant.fields {
-            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => fields.unnamed.into_iter().next().unwrap().ty,
+            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                fields.unnamed.into_iter().next().unwrap().ty
+            }
             _ => {
                 return Err(syn::Error::new_spanned(
                     variant_ident,
@@ -222,8 +234,17 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
 
         variant_arms.push(quote! {
             #variant_name_lit => {
-                let cfg = <#inner_ty as ::kwconf::Config>::from_sources(selection.sources)?;
-                ::core::result::Result::Ok(Self::#variant_ident(cfg))
+                match <#inner_ty as ::kwconf::Config>::from_sources(selection.sources) {
+                    ::core::result::Result::Ok(cfg) => ::core::result::Result::Ok(Self::#variant_ident(cfg)),
+                    ::core::result::Result::Err(::kwconf::Error::HelpRequested { text, color, .. }) => {
+                        ::core::result::Result::Err(::kwconf::Error::HelpRequested {
+                            text,
+                            color,
+                            root_command: false,
+                        })
+                    }
+                    ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
+                }
             }
         });
     }
@@ -231,6 +252,7 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
     let spec_name = enum_opts.name.unwrap_or_else(|| ident.to_string());
     let spec_about = option_lit(enum_opts.about.as_deref());
     let default_variant_tokens = option_lit(default_variant.as_deref());
+    let special_options = enum_opts.special_options.to_tokens();
 
     Ok(quote! {
         impl ::kwconf::ModalConfig for #ident {
@@ -247,6 +269,7 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
                         about: #spec_about,
                         variants,
                         default_variant: #default_variant_tokens,
+                        special_options: #special_options,
                     }
                 })
             }
@@ -325,17 +348,58 @@ fn is_string_type(field_ty: &Type) -> bool {
             .path
             .segments
             .last()
-            .map_or(false, |segment| segment.ident == "String" && segment.arguments.is_empty())
+            .is_some_and(|segment| segment.ident == "String" && segment.arguments.is_empty())
+}
+
+fn is_bool_type(field_ty: &Type) -> bool {
+    let Type::Path(path) = field_ty else {
+        return false;
+    };
+    path.qself.is_none()
+        && path
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "bool" && segment.arguments.is_empty())
 }
 
 fn is_string_literal(expr: &Expr) -> bool {
-    matches!(expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }))
+    matches!(
+        expr,
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(_),
+            ..
+        })
+    )
+}
+
+#[derive(Default)]
+struct SpecialOptionsOpts {
+    config: bool,
+    color: bool,
+    completion: bool,
+}
+
+impl SpecialOptionsOpts {
+    fn to_tokens(&self) -> proc_macro2::TokenStream {
+        let config = self.config;
+        let color = self.color;
+        let completion = self.completion;
+        quote! {
+            ::kwconf::SpecialOptions {
+                config: #config,
+                color: #color,
+                completion: #completion,
+            }
+        }
+    }
 }
 
 #[derive(Default)]
 struct StructOpts {
     name: Option<String>,
     about: Option<String>,
+    special_options: SpecialOptionsOpts,
 }
 
 impl StructOpts {
@@ -349,6 +413,25 @@ impl StructOpts {
                 } else if meta.path.is_ident("about") {
                     opts.about = Some(parse_lit_string(meta.value()?)?);
                     Ok(())
+                } else if meta.path.is_ident("special_options") {
+                    meta.parse_nested_meta(|nested| {
+                        if nested.path.is_ident("config") {
+                            opts.special_options.config = true;
+                            Ok(())
+                        } else if nested.path.is_ident("color") {
+                            opts.special_options.color = true;
+                            Ok(())
+                        } else if nested.path.is_ident("completion")
+                            || nested.path.is_ident("completions")
+                            || nested.path.is_ident("generate_completion")
+                            || nested.path.is_ident("generate_completions")
+                        {
+                            opts.special_options.completion = true;
+                            Ok(())
+                        } else {
+                            Err(nested.error("unsupported special option; expected config, color, or generate_completion"))
+                        }
+                    })
                 } else {
                     Err(meta.error("unsupported struct kwconf attribute"))
                 }
@@ -459,8 +542,15 @@ fn parse_string_array(arr: ExprArray) -> syn::Result<Vec<String>> {
     let mut values = Vec::new();
     for elem in arr.elems {
         match elem {
-            Expr::Lit(ExprLit { lit: Lit::Str(lit), .. }) => values.push(lit.value()),
-            other => return Err(syn::Error::new_spanned(other, "choices must be string literals")),
+            Expr::Lit(ExprLit {
+                lit: Lit::Str(lit), ..
+            }) => values.push(lit.value()),
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "choices must be string literals",
+                ))
+            }
         }
     }
     Ok(values)

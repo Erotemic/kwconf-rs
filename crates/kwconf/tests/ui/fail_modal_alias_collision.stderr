@@ -1,0 +1,5 @@
+error: kwconf option `eval` is claimed by both alias `eval` of variant `Train` and variant `Eval`
+  --> tests/ui/fail_modal_alias_collision.rs:16:5
+   |
+16 |     Eval(Leaf),
+   |     ^^^^

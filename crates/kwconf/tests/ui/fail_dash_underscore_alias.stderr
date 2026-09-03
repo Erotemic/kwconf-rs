@@ -1,0 +1,5 @@
+error: kwconf option `learning-rate` is claimed by both alias `learning-rate` of field `lr` and field `learning_rate`
+  --> tests/ui/fail_dash_underscore_alias.rs:10:5
+   |
+10 |     learning_rate: u32,
+   |     ^^^^^^^^^^^^^

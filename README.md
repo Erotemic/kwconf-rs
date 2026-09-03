@@ -187,15 +187,23 @@ subcommand with the other subcommand fields.
 
 ## Parsers
 
-Parsers convert string-only sources into typed config values.
+Parsers convert string-only sources into typed config values. Text from argv
+and env is kept as written until the final deserialization, and the field type
+decides how to read it: `--label=123` stays `"123"` for a `String` and becomes
+`123` for a `u32`.
 
-- `auto` parses booleans, numbers, `null`, JSON arrays, and JSON objects. Other
-  values stay strings.
-- `csv` splits a comma-separated string into an array of strings.
+- `auto` coerces by the field type: booleans accept `true/false`, `yes/no`,
+  `on/off`, and `1/0`; `Option` treats `null` and `none` as `None`; unit enums
+  take the variant name; collections take JSON. Untyped `serde_json::Value`
+  fields infer booleans, numbers, `null`, JSON arrays, and JSON objects.
+- `csv` splits a comma-separated string and coerces each element by the element
+  type, so `Vec<i64>` gets integers.
 - `yaml` parses a YAML scalar, sequence, or mapping.
 
 Config files are already structured sources. Their values deserialize directly
 into the target struct.
+
+Bool fields also get `--no-<name>`; the last assignment in argv wins.
 
 ## Source precedence
 
@@ -271,8 +279,21 @@ let cfg = TrainConfig::cli();
 
 See `docs/porting-from-kwconf.md` for more cases.
 
+## Public API
+
+The supported surface is small on purpose: the `Config` and `ModalConfig`
+derives and traits, `Sources`, `Error`, `Help`, and the re-exported
+`ColorChoice` and `CompletionShell`. Everything under `kwconf::__private` is
+derive plumbing and may change in any release.
+
+Schema mistakes are caught early. Two fields that would claim the same option
+(including `--no-flag` negations, aliases, and dash/underscore variants) are a
+compile error; collisions across nested subconfigs are reported as
+`Error::Schema` before anything is parsed. Generic config structs are
+supported, and `#[kwconf(crate = "path")]` handles a renamed dependency.
+
 ## Status
 
 Version 0.1.x is an early release. The API should stay small until real ports
 expose the repeated patterns, so expect breaking changes before 1.0. The minimum
-supported Rust version is 1.85.
+supported Rust version is 1.85. See `CHANGELOG.md` for release notes.

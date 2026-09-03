@@ -21,3 +21,4 @@ yaml_serde.workspace = true
 
 [dev-dependencies]
 serde.workspace = true
+trybuild = "1.0"

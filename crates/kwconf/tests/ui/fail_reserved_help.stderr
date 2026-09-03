@@ -1,0 +1,5 @@
+error: kwconf option `help` is claimed by both the built-in --help flag and field `help`
+ --> tests/ui/fail_reserved_help.rs:7:5
+  |
+7 |     help: String,
+  |     ^^^^

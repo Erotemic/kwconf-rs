@@ -1,0 +1,5 @@
+error: kwconf option `rate` is claimed by both alias `rate` of field `lr` and field `rate`
+  --> tests/ui/fail_duplicate_alias.rs:10:5
+   |
+10 |     rate: u32,
+   |     ^^^^

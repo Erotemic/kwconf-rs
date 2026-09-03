@@ -1,0 +1,5 @@
+error: kwconf option `no-cache` is claimed by both the negation of bool field `cache` and field `no_cache`
+  --> tests/ui/fail_negation_collision.rs:10:5
+   |
+10 |     no_cache: u32,
+   |     ^^^^^^^^

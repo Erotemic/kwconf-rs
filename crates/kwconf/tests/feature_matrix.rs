@@ -359,7 +359,7 @@ fn choices_are_checked_for_config_env_and_argv_sources() {
     let argv_err = parse_feature(["feature-matrix", "--backend.architecture=cnn"]).unwrap_err();
     assert!(argv_err
         .to_string()
-        .contains("invalid value for architecture"));
+        .contains("invalid value for backend.architecture"));
 }
 
 #[test]

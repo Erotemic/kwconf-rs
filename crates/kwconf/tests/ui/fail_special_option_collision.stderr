@@ -1,0 +1,5 @@
+error: kwconf option `config` is claimed by both the --config special option and field `config`
+ --> tests/ui/fail_special_option_collision.rs:7:5
+  |
+7 |     config: String,
+  |     ^^^^^^

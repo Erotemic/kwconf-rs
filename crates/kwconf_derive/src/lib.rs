@@ -1,6 +1,15 @@
+//! Derive macros for [`kwconf`](https://crates.io/crates/kwconf).
+//!
+//! Use `kwconf::Config` and `kwconf::ModalConfig`; this crate is an
+//! implementation detail re-exported by `kwconf`.
+
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Expr, ExprArray, ExprLit, Fields, Lit, Type};
+use quote::{quote, ToTokens};
+use std::collections::HashMap;
+use syn::{
+    parse_macro_input, Data, DeriveInput, Expr, ExprArray, ExprLit, Fields, GenericParam, Generics,
+    Lit, Type,
+};
 
 #[proc_macro_derive(Config, attributes(kwconf))]
 pub fn derive_config(input: TokenStream) -> TokenStream {
@@ -20,9 +29,47 @@ pub fn derive_modal_config(input: TokenStream) -> TokenStream {
     }
 }
 
+/// Dash/underscore-insensitive CLI name form.
+fn normalize(name: &str) -> String {
+    name.trim_start_matches('-').replace('-', "_")
+}
+
+/// Tracks the option namespace of one struct so collisions become compile errors.
+#[derive(Default)]
+struct NameSpace {
+    claimed: HashMap<String, String>,
+}
+
+impl NameSpace {
+    fn claim(&mut self, name: &str, owner: &str, span: &dyn ToTokens) -> syn::Result<()> {
+        let key = normalize(name);
+        if key.is_empty() {
+            return Err(syn::Error::new_spanned(
+                span,
+                "option names cannot be empty",
+            ));
+        }
+        if let Some(existing) = self.claimed.get(&key) {
+            return Err(syn::Error::new_spanned(
+                span,
+                format!(
+                    "kwconf option `{}` is claimed by both {existing} and {owner}",
+                    key.replace('_', "-")
+                ),
+            ));
+        }
+        self.claimed.insert(key, owner.to_string());
+        Ok(())
+    }
+}
+
 fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = input.ident;
     let struct_opts = StructOpts::from_attrs(&input.attrs)?;
+    let krate = struct_opts
+        .krate
+        .clone()
+        .unwrap_or_else(|| syn::parse_quote!(::kwconf));
 
     let fields = match input.data {
         Data::Struct(data) => match data.fields {
@@ -42,6 +89,32 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         }
     };
 
+    let mut names = NameSpace::default();
+    names.claim("help", "the built-in --help flag", &ident)?;
+    if struct_opts.special_options.config {
+        names.claim("config", "the --config special option", &ident)?;
+    }
+    if struct_opts.special_options.color {
+        names.claim("color", "the --color special option", &ident)?;
+    }
+    if struct_opts.special_options.completion {
+        names.claim(
+            "generate-completion",
+            "the --generate-completion special option",
+            &ident,
+        )?;
+    }
+
+    let generic_idents: Vec<String> = input
+        .generics
+        .params
+        .iter()
+        .filter_map(|param| match param {
+            GenericParam::Type(ty) => Some(ty.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+
     let mut default_fields = Vec::new();
     let mut infos = Vec::new();
 
@@ -57,6 +130,32 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 "#[kwconf(modal)] is reserved for a future inline modal field API; derive kwconf::ModalConfig on an enum instead",
             ));
         }
+        if opts.subconfig && mentions_generic(&field_ty, &generic_idents) {
+            return Err(syn::Error::new_spanned(
+                field_ty,
+                "#[kwconf(subconfig)] fields cannot use the struct's generic parameters",
+            ));
+        }
+
+        let owner = format!("field `{field_name}`");
+        names.claim(&field_name, &owner, &field_ident)?;
+        for alias in &opts.aliases {
+            names.claim(alias, &format!("alias `{alias}` of {owner}"), &field_ident)?;
+        }
+        if is_bool_type(&field_ty) && !opts.subconfig {
+            names.claim(
+                &format!("no-{field_name}"),
+                &format!("the negation of bool {owner}"),
+                &field_ident,
+            )?;
+            for alias in &opts.aliases {
+                names.claim(
+                    &format!("no-{alias}"),
+                    &format!("the negation of alias `{alias}` of {owner}"),
+                    &field_ident,
+                )?;
+            }
+        }
 
         let default_expr = match opts.default {
             Some(Some(expr)) => default_expr_for_field(&field_ty, &expr),
@@ -65,9 +164,9 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         default_fields.push(quote! { #field_ident: #default_expr });
 
         let parser = match opts.parser.as_deref().unwrap_or("auto") {
-            "auto" => quote! { ::kwconf::Parser::Auto },
-            "csv" => quote! { ::kwconf::Parser::Csv },
-            "yaml" => quote! { ::kwconf::Parser::Yaml },
+            "auto" => quote! { #krate::__private::Parser::Auto },
+            "csv" => quote! { #krate::__private::Parser::Csv },
+            "yaml" => quote! { #krate::__private::Parser::Yaml },
             other => {
                 return Err(syn::Error::new_spanned(
                     field_ident,
@@ -81,18 +180,18 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let alias_lits = opts.aliases.iter().map(|value| quote! { #value });
         let choice_lits = opts.choices.iter().map(|value| quote! { #value });
         let kind = if opts.subconfig {
-            quote! { ::kwconf::FieldKind::Subconfig(<#field_ty as ::kwconf::Config>::config_spec()) }
+            quote! { #krate::__private::FieldKind::Subconfig(<#field_ty as #krate::Config>::config_spec()) }
         } else {
-            quote! { ::kwconf::FieldKind::Value }
+            quote! { #krate::__private::FieldKind::Value }
         };
         let value_type = if is_bool_type(&field_ty) {
-            quote! { ::kwconf::ValueType::Bool }
+            quote! { #krate::__private::ValueType::Bool }
         } else {
-            quote! { ::kwconf::ValueType::Other }
+            quote! { #krate::__private::ValueType::Other }
         };
 
         infos.push(quote! {
-            ::kwconf::FieldInfo {
+            #krate::__private::FieldInfo {
                 name: #field_name,
                 aliases: &[#(#alias_lits),*],
                 env: #env,
@@ -107,9 +206,22 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let spec_name = struct_opts.name.unwrap_or_else(|| ident.to_string());
     let spec_about = option_lit(struct_opts.about.as_deref());
-    let special_options = struct_opts.special_options.to_tokens();
+    let special_options = struct_opts.special_options.to_tokens(&krate);
+
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    let default_where = with_bounds(
+        where_clause,
+        &input.generics,
+        quote! { ::core::default::Default },
+    );
+    let config_where = with_bounds(
+        where_clause,
+        &input.generics,
+        quote! { ::core::default::Default + #krate::__private::serde::Serialize + #krate::__private::serde::de::DeserializeOwned },
+    );
+
     Ok(quote! {
-        impl ::core::default::Default for #ident {
+        impl #impl_generics ::core::default::Default for #ident #ty_generics #default_where {
             fn default() -> Self {
                 Self {
                     #(#default_fields),*
@@ -117,57 +229,52 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             }
         }
 
-        impl ::kwconf::Config for #ident {
-            fn config_spec() -> &'static ::kwconf::ConfigSpec {
-                static SPEC: ::std::sync::OnceLock<::kwconf::ConfigSpec> = ::std::sync::OnceLock::new();
+        impl #impl_generics #krate::Config for #ident #ty_generics #config_where {
+            fn config_spec() -> &'static #krate::__private::ConfigSpec {
+                static SPEC: ::std::sync::OnceLock<#krate::__private::ConfigSpec> = ::std::sync::OnceLock::new();
                 SPEC.get_or_init(|| {
-                    let fields: &'static [::kwconf::FieldInfo] = ::std::boxed::Box::leak(
-                        ::std::vec::Vec::from([
-                            #(#infos),*
-                        ]).into_boxed_slice()
-                    );
-                    ::kwconf::ConfigSpec {
+                    #krate::__private::ConfigSpec {
                         name: #spec_name,
                         about: #spec_about,
-                        fields,
+                        fields: ::std::vec![#(#infos),*],
                         special_options: #special_options,
                     }
                 })
             }
         }
 
-        impl #ident {
-            pub fn from_sources(sources: ::kwconf::Sources) -> ::kwconf::Result<Self> {
-                <Self as ::kwconf::Config>::from_sources(sources)
+        impl #impl_generics #ident #ty_generics #config_where {
+            pub fn from_sources(sources: #krate::Sources) -> #krate::Result<Self> {
+                <Self as #krate::Config>::from_sources(sources)
             }
 
             #[allow(clippy::should_implement_trait)]
-            pub fn from_iter<I, T>(args: I) -> ::kwconf::Result<Self>
+            pub fn from_iter<__I, __T>(args: __I) -> #krate::Result<Self>
             where
-                I: ::core::iter::IntoIterator<Item = T>,
-                T: ::core::convert::Into<::std::ffi::OsString>,
+                __I: ::core::iter::IntoIterator<Item = __T>,
+                __T: ::core::convert::Into<::std::ffi::OsString>,
             {
-                <Self as ::kwconf::Config>::from_iter(args)
+                <Self as #krate::Config>::from_iter(args)
             }
 
-            pub fn try_cli() -> ::kwconf::Result<Self> {
-                <Self as ::kwconf::Config>::try_cli()
+            pub fn try_cli() -> #krate::Result<Self> {
+                <Self as #krate::Config>::try_cli()
             }
 
             pub fn cli() -> Self {
-                <Self as ::kwconf::Config>::cli()
+                <Self as #krate::Config>::cli()
             }
 
             pub fn help() -> ::std::string::String {
-                <Self as ::kwconf::Config>::help()
+                <Self as #krate::Config>::help()
             }
 
-            pub fn help_with_color(color: ::kwconf::ColorChoice) -> ::std::string::String {
-                <Self as ::kwconf::Config>::help_with_color(color)
+            pub fn help_with_color(color: #krate::ColorChoice) -> ::std::string::String {
+                <Self as #krate::Config>::help_with_color(color)
             }
 
-            pub fn completion_script(shell: ::kwconf::CompletionShell, bin_name: &str) -> ::std::string::String {
-                <Self as ::kwconf::Config>::completion_script(shell, bin_name)
+            pub fn completion_script(shell: #krate::CompletionShell, bin_name: &str) -> ::std::string::String {
+                <Self as #krate::Config>::completion_script(shell, bin_name)
             }
         }
     })
@@ -176,6 +283,10 @@ fn expand_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = input.ident;
     let enum_opts = StructOpts::from_attrs(&input.attrs)?;
+    let krate = enum_opts
+        .krate
+        .clone()
+        .unwrap_or_else(|| syn::parse_quote!(::kwconf));
 
     let variants = match input.data {
         Data::Enum(data) => data.variants,
@@ -187,6 +298,7 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
         }
     };
 
+    let mut names = NameSpace::default();
     let mut variant_infos = Vec::new();
     let mut variant_arms = Vec::new();
     let mut default_variant = None::<String>;
@@ -207,6 +319,16 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
             default_variant = Some(variant_name.clone());
         }
 
+        let owner = format!("variant `{variant_ident}`");
+        names.claim(&variant_name, &owner, &variant_ident)?;
+        for alias in &opts.aliases {
+            names.claim(
+                alias,
+                &format!("alias `{alias}` of {owner}"),
+                &variant_ident,
+            )?;
+        }
+
         let inner_ty = match variant.fields {
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
                 fields.unnamed.into_iter().next().unwrap().ty
@@ -224,27 +346,17 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
         let variant_name_lit = variant_name.clone();
 
         variant_infos.push(quote! {
-            ::kwconf::ModalVariantInfo {
+            #krate::__private::ModalVariantInfo {
                 name: #variant_name_lit,
                 aliases: &[#(#alias_lits),*],
                 help: #help,
-                config_spec: <#inner_ty as ::kwconf::Config>::config_spec(),
+                config_spec: <#inner_ty as #krate::Config>::config_spec(),
             }
         });
 
         variant_arms.push(quote! {
             #variant_name_lit => {
-                match <#inner_ty as ::kwconf::Config>::from_sources(selection.sources) {
-                    ::core::result::Result::Ok(cfg) => ::core::result::Result::Ok(Self::#variant_ident(cfg)),
-                    ::core::result::Result::Err(::kwconf::Error::HelpRequested { text, color, .. }) => {
-                        ::core::result::Result::Err(::kwconf::Error::HelpRequested {
-                            text,
-                            color,
-                            root_command: false,
-                        })
-                    }
-                    ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
-                }
+                #krate::__private::resolve_modal_variant::<#inner_ty>(selection).map(Self::#variant_ident)
             }
         });
     }
@@ -252,76 +364,103 @@ fn expand_modal_config(input: DeriveInput) -> syn::Result<proc_macro2::TokenStre
     let spec_name = enum_opts.name.unwrap_or_else(|| ident.to_string());
     let spec_about = option_lit(enum_opts.about.as_deref());
     let default_variant_tokens = option_lit(default_variant.as_deref());
-    let special_options = enum_opts.special_options.to_tokens();
+    let special_options = enum_opts.special_options.to_tokens(&krate);
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     Ok(quote! {
-        impl ::kwconf::ModalConfig for #ident {
-            fn modal_spec() -> &'static ::kwconf::ModalSpec {
-                static SPEC: ::std::sync::OnceLock<::kwconf::ModalSpec> = ::std::sync::OnceLock::new();
+        impl #impl_generics #krate::ModalConfig for #ident #ty_generics #where_clause {
+            fn modal_spec() -> &'static #krate::__private::ModalSpec {
+                static SPEC: ::std::sync::OnceLock<#krate::__private::ModalSpec> = ::std::sync::OnceLock::new();
                 SPEC.get_or_init(|| {
-                    let variants: &'static [::kwconf::ModalVariantInfo] = ::std::boxed::Box::leak(
-                        ::std::vec::Vec::from([
-                            #(#variant_infos),*
-                        ]).into_boxed_slice()
-                    );
-                    ::kwconf::ModalSpec {
+                    #krate::__private::ModalSpec {
                         name: #spec_name,
                         about: #spec_about,
-                        variants,
+                        variants: ::std::vec![#(#variant_infos),*],
                         default_variant: #default_variant_tokens,
                         special_options: #special_options,
                     }
                 })
             }
 
-            fn from_sources(sources: ::kwconf::Sources) -> ::kwconf::Result<Self> {
-                let selection = ::kwconf::resolve_modal_selection(Self::modal_spec(), sources)?;
-                match selection.variant {
+            fn from_sources(sources: #krate::Sources) -> #krate::Result<Self> {
+                let selection = #krate::__private::resolve_modal_selection(Self::modal_spec(), sources)?;
+                match selection.variant() {
                     #(#variant_arms),*,
-                    other => ::core::result::Result::Err(::kwconf::Error::InvalidModalVariant(other.to_string())),
+                    other => ::core::result::Result::Err(#krate::Error::InvalidModalVariant(other.to_string())),
                 }
             }
         }
 
-        impl #ident {
-            pub fn modal_spec() -> &'static ::kwconf::ModalSpec {
-                <Self as ::kwconf::ModalConfig>::modal_spec()
-            }
-
-            pub fn from_sources(sources: ::kwconf::Sources) -> ::kwconf::Result<Self> {
-                <Self as ::kwconf::ModalConfig>::from_sources(sources)
+        impl #impl_generics #ident #ty_generics #where_clause {
+            pub fn from_sources(sources: #krate::Sources) -> #krate::Result<Self> {
+                <Self as #krate::ModalConfig>::from_sources(sources)
             }
 
             #[allow(clippy::should_implement_trait)]
-            pub fn from_iter<I, T>(args: I) -> ::kwconf::Result<Self>
+            pub fn from_iter<__I, __T>(args: __I) -> #krate::Result<Self>
             where
-                I: ::core::iter::IntoIterator<Item = T>,
-                T: ::core::convert::Into<::std::ffi::OsString>,
+                __I: ::core::iter::IntoIterator<Item = __T>,
+                __T: ::core::convert::Into<::std::ffi::OsString>,
             {
-                <Self as ::kwconf::ModalConfig>::from_iter(args)
+                <Self as #krate::ModalConfig>::from_iter(args)
             }
 
-            pub fn try_cli() -> ::kwconf::Result<Self> {
-                <Self as ::kwconf::ModalConfig>::try_cli()
+            pub fn try_cli() -> #krate::Result<Self> {
+                <Self as #krate::ModalConfig>::try_cli()
             }
 
             pub fn cli() -> Self {
-                <Self as ::kwconf::ModalConfig>::cli()
+                <Self as #krate::ModalConfig>::cli()
             }
 
             pub fn help() -> ::std::string::String {
-                <Self as ::kwconf::ModalConfig>::help()
+                <Self as #krate::ModalConfig>::help()
             }
 
-            pub fn help_with_color(color: ::kwconf::ColorChoice) -> ::std::string::String {
-                <Self as ::kwconf::ModalConfig>::help_with_color(color)
+            pub fn help_with_color(color: #krate::ColorChoice) -> ::std::string::String {
+                <Self as #krate::ModalConfig>::help_with_color(color)
             }
 
-            pub fn completion_script(shell: ::kwconf::CompletionShell, bin_name: &str) -> ::std::string::String {
-                <Self as ::kwconf::ModalConfig>::completion_script(shell, bin_name)
+            pub fn completion_script(shell: #krate::CompletionShell, bin_name: &str) -> ::std::string::String {
+                <Self as #krate::ModalConfig>::completion_script(shell, bin_name)
             }
         }
     })
+}
+
+/// Extend a where clause with `bounds` for every generic type parameter.
+fn with_bounds(
+    where_clause: Option<&syn::WhereClause>,
+    generics: &Generics,
+    bounds: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let params: Vec<&syn::Ident> = generics
+        .params
+        .iter()
+        .filter_map(|param| match param {
+            GenericParam::Type(ty) => Some(&ty.ident),
+            _ => None,
+        })
+        .collect();
+    if params.is_empty() {
+        return quote! { #where_clause };
+    }
+    let existing: Vec<&syn::WherePredicate> = where_clause
+        .map(|clause| clause.predicates.iter().collect())
+        .unwrap_or_default();
+    quote! {
+        where #(#existing,)* #(#params: #bounds),*
+    }
+}
+
+fn mentions_generic(ty: &Type, generic_idents: &[String]) -> bool {
+    if generic_idents.is_empty() {
+        return false;
+    }
+    let rendered = ty.to_token_stream().to_string();
+    rendered
+        .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+        .any(|word| generic_idents.iter().any(|ident| ident == word))
 }
 
 fn option_lit(value: Option<&str>) -> proc_macro2::TokenStream {
@@ -339,7 +478,7 @@ fn default_expr_for_field(field_ty: &Type, expr: &Expr) -> proc_macro2::TokenStr
     }
 }
 
-fn is_string_type(field_ty: &Type) -> bool {
+fn is_named_type(field_ty: &Type, name: &str) -> bool {
     let Type::Path(path) = field_ty else {
         return false;
     };
@@ -348,19 +487,15 @@ fn is_string_type(field_ty: &Type) -> bool {
             .path
             .segments
             .last()
-            .is_some_and(|segment| segment.ident == "String" && segment.arguments.is_empty())
+            .is_some_and(|segment| segment.ident == name && segment.arguments.is_empty())
+}
+
+fn is_string_type(field_ty: &Type) -> bool {
+    is_named_type(field_ty, "String")
 }
 
 fn is_bool_type(field_ty: &Type) -> bool {
-    let Type::Path(path) = field_ty else {
-        return false;
-    };
-    path.qself.is_none()
-        && path
-            .path
-            .segments
-            .last()
-            .is_some_and(|segment| segment.ident == "bool" && segment.arguments.is_empty())
+    is_named_type(field_ty, "bool")
 }
 
 fn is_string_literal(expr: &Expr) -> bool {
@@ -381,12 +516,12 @@ struct SpecialOptionsOpts {
 }
 
 impl SpecialOptionsOpts {
-    fn to_tokens(&self) -> proc_macro2::TokenStream {
+    fn to_tokens(&self, krate: &syn::Path) -> proc_macro2::TokenStream {
         let config = self.config;
         let color = self.color;
         let completion = self.completion;
         quote! {
-            ::kwconf::SpecialOptions {
+            #krate::__private::SpecialOptions {
                 config: #config,
                 color: #color,
                 completion: #completion,
@@ -400,6 +535,7 @@ struct StructOpts {
     name: Option<String>,
     about: Option<String>,
     special_options: SpecialOptionsOpts,
+    krate: Option<syn::Path>,
 }
 
 impl StructOpts {
@@ -412,6 +548,10 @@ impl StructOpts {
                     Ok(())
                 } else if meta.path.is_ident("about") {
                     opts.about = Some(parse_lit_string(meta.value()?)?);
+                    Ok(())
+                } else if meta.path.is_ident("crate") {
+                    let lit: syn::LitStr = meta.value()?.parse()?;
+                    opts.krate = Some(lit.parse::<syn::Path>()?);
                     Ok(())
                 } else if meta.path.is_ident("special_options") {
                     meta.parse_nested_meta(|nested| {
@@ -433,7 +573,7 @@ impl StructOpts {
                         }
                     })
                 } else {
-                    Err(meta.error("unsupported struct kwconf attribute"))
+                    Err(meta.error("unsupported kwconf attribute; expected name, about, crate, or special_options"))
                 }
             })?;
         }

@@ -1,0 +1,5 @@
+error: #[kwconf(subconfig)] fields cannot use the struct's generic parameters
+ --> tests/ui/fail_generic_subconfig.rs:7:12
+  |
+7 |     inner: T,
+  |            ^

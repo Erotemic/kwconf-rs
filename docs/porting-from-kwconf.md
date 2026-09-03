@@ -92,7 +92,9 @@ Rust:
 let cfg = TrainConfig::cli();
 ```
 
-Use `try_cli()` or `from_iter(...)` in tests.
+Use `try_cli()` or `from_iter(...)` in tests. Both read declared env bindings
+from the process; use `Sources::empty().with_args(...)` for a fully explicit
+run.
 
 
 ## Nested configs

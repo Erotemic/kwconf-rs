@@ -14,15 +14,19 @@
 - `clap` color policy for help
 - generated shell completion scripts
 - Python kwconf / Rust kwconf-rs parity demo
+- type-directed coercion of argv/env text (a `String` field keeps `"123"`)
+- one `clap` model for parsing, help, and completions
+- schema collision checks at compile time and at first use
+- generic config structs and `#[kwconf(crate = ...)]`
 
 ## Next useful work
 
-- better error provenance;
 - snapshot tests for help text;
 - install docs for completion scripts;
 - a small migration guide for real kwconf CLIs;
 - inline modal fields if real ports need them;
-- deeper clap interop.
+- deeper clap interop (short options, positionals);
+- benchmarks for startup cost before adding lookup caches.
 
 ## Keep deferred
 

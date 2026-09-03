@@ -1,0 +1,5 @@
+error: kwconf::Config only supports structs
+ --> tests/ui/fail_not_a_struct.rs:2:6
+  |
+2 | enum NotAStruct {
+  |      ^^^^^^^^^^

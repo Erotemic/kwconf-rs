@@ -64,7 +64,17 @@ tags: Vec<String>,
 Env values are strings, so the field parser is used. Nested env bindings live on
 the nested field.
 
+Only declared variables are read, one at a time, so an unrelated variable with
+non-Unicode content never affects a run. A declared variable that is not valid
+UTF-8 is an error. `Sources::new()`, `Sources::from_iter(...)`, `cli()`,
+`try_cli()`, and `from_iter(...)` read the process environment;
+`Sources::empty()` does not unless `with_process_env(true)` is set. Explicit
+`with_env(...)` bindings win over the process environment.
+
 ## Argv
+
+Argv is recognized by one `clap` command model that is also used for help and
+completion scripts, so the three never disagree.
 
 Argv accepts long options:
 
@@ -72,9 +82,21 @@ Argv accepts long options:
 --name value
 --name=value
 --bool-flag
+--no-bool-flag
 ```
 
-Boolean flags without an explicit value receive `true`.
+Boolean flags without an explicit value receive `true`; `--no-flag` sets the
+field to `false`. When the same field is assigned more than once, the last
+assignment in argv wins, including across `--flag` and `--no-flag`.
+
+Dashes and underscores are interchangeable in option names, in any mix.
+Aliases apply to every component of a dotted path, so with a subconfig field
+`optimizer` aliased to `opt` and a leaf `learning_rate` aliased to `lr`,
+`--opt.lr=1` is accepted. Help lists the canonical spelling, its underscore
+form, and leaf aliases.
+
+Unknown options, stray positionals, and anything after `--` are errors.
+`-h` and `--help` are always available.
 
 Nested subconfigs use dotted paths:
 
@@ -98,26 +120,41 @@ struct TrainConfig {
 }
 ```
 
-For modal CLIs, root runtime flags go before the subcommand. If the selected subcommand config also enables a runtime flag, that flag can appear after the subcommand with the rest of the subcommand fields.
+For modal CLIs, root runtime flags go before the subcommand. If the selected subcommand config also enables a runtime flag, that flag can appear after the subcommand with the rest of the subcommand fields. A root `--config` file contributes the selected variant's table; a subcommand `--config` file is layered on top of it.
+
+The schema is validated before any parsing. Two fields, aliases, negations, or
+special options that would claim the same option (compared
+dash/underscore-insensitively) are a compile error inside one struct and an
+`Error::Schema` when the collision spans nested subconfigs. `help` is always
+reserved.
 
 ## Parsers
 
 Parsers only apply to string-only sources: env and argv.
 
+argv and env text is kept verbatim until the final deserialization, and the
+destination field type decides how it is read. `--label=123` stays `"123"` for
+a `String` field and becomes `123` for a `u32` field. This mirrors Python
+kwconf, where `auto('123', str)` stays a string.
+
 ### auto
 
-`auto` parses common scalar values:
+`auto` coerces text by the destination type:
 
-- `true` and `false`
-- integers and floats
-- `null` and `none`
-- JSON arrays and objects
-
-Other values stay strings.
+- `String`: the text as written.
+- `bool`: `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0` (case-insensitive).
+- integers and floats: parsed from the trimmed text.
+- `Option<T>`: `null` and `none` are `None`; anything else is `Some`.
+- unit enums: the text is the variant name (after serde renames).
+- `Vec<T>`, maps, and structs: a JSON array or object.
+- `serde_json::Value` and other untyped destinations: `true`/`false`, integers,
+  floats, `null`/`none`, JSON arrays and objects are inferred; other values
+  stay strings.
 
 ### csv
 
-`csv` splits a comma-separated string into an array of strings.
+`csv` splits a comma-separated string and coerces each element by the element
+type, so `Vec<i64>` receives integers and `Vec<String>` receives strings.
 
 ```text
 --tags=red,blue
@@ -129,15 +166,24 @@ becomes:
 ["red", "blue"]
 ```
 
+An empty string is an empty list.
+
 ### yaml
 
-`yaml` parses a YAML scalar, sequence, or mapping from a string.
+`yaml` parses a YAML scalar, sequence, or mapping from a string and then
+deserializes the result into the field. A `String` field still receives the
+text of a scalar.
 
 Use it when a field needs structured data from env or argv.
 
+Deserialization errors name the dotted field path, the offending text, and its
+source (`argv` or `env`).
+
 ## Choices
 
-`choices` validates string values before deserialization.
+`choices` validates values before deserialization. argv and env text is
+compared as written; config values are compared as strings, numbers, or
+booleans.
 
 ```rust
 #[kwconf(default = "fast", choices = ["fast", "safe"])]
@@ -181,10 +227,14 @@ The default variant is used when argv and config do not select one.
 
 ## Help and completion
 
-`kwconf-rs` builds help and completion metadata from the same field spec.
+`kwconf-rs` builds help, completion scripts, and argv parsing from one `clap`
+command model.
 
 - `Config::help()` renders normal help.
 - `ModalConfig::help()` renders modal help.
+- `--help` inside `cli()` prints help and exits `0`; `try_cli()` returns
+  `Error::HelpRequested(Help)` with plain and ANSI text plus the requested
+  color policy.
 - `--color auto|always|never` controls color for CLI help when `special_options(color)` is enabled.
 - `help_with_color(...)` renders help with an explicit color policy without requiring the CLI flag.
 - `--generate-completion SHELL` prints a completion script when `special_options(generate_completion)` is enabled.

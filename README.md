@@ -273,5 +273,6 @@ See `docs/porting-from-kwconf.md` for more cases.
 
 ## Status
 
-This is a repo starter, not a crates.io release. The API should stay small until
-real ports expose the repeated patterns.
+Version 0.1.x is an early release. The API should stay small until real ports
+expose the repeated patterns, so expect breaking changes before 1.0. The minimum
+supported Rust version is 1.85.

@@ -38,7 +38,7 @@ The derive implements `Default` for the config/CLI struct.
 
 ## CLI grammar ownership
 
-One clap command model owns:
+One clap command model (implemented with `clap_builder`) owns:
 
 - argv recognition;
 - long-option aliases;
@@ -125,20 +125,21 @@ kwconf's current empty-component filtering.
 
 ### `yaml`
 
-YAML is parsed before destination conversion. Malformed YAML is always an
-error; a `String` field does not turn malformed YAML back into the raw token.
+With the `yaml` Cargo feature, YAML is parsed before destination conversion.
+Malformed YAML is always an error; a `String` field does not turn malformed
+YAML back into the raw token. Without that feature, requesting `parser =
+"yaml"` returns a feature-required error.
 
 ## Config files
 
-With the `config` feature, supported extensions are:
+The `config` feature always supports `.json`. Format features add:
 
-- `.toml`
-- `.json`
-- `.yaml`
-- `.yml`
+- `toml` (enabled by default): `.toml`;
+- `yaml` (opt-in): `.yaml` and `.yml`.
 
-Unknown extensions are tried as TOML, JSON, and YAML and report all three
-parser failures when none succeeds.
+Requesting a disabled format reports the Cargo feature needed to enable it.
+Unknown extensions are tried against every format enabled in that build and
+report those parser failures when none succeeds.
 
 Config keys use kwconf field names and aliases, with dash/underscore
 normalization. They do not depend on Serde rename attributes on the outer config
@@ -178,11 +179,21 @@ kwconf = { version = "0.1", default-features = false }
 # Python-like CLI struct API, one kwconf proc-macro layer, no Serde
 kwconf = { version = "0.1", default-features = false, features = ["derive"] }
 
-# Full layered config API (default)
+# Normal layered config API: derive + config + JSON + TOML
 kwconf = "0.1"
+
+# Add YAML/YML
+kwconf = { version = "0.1", features = ["yaml"] }
+
+# Add shell-completion generation
+kwconf = { version = "0.1", features = ["completion"] }
+
+# All supported capabilities
+kwconf = { version = "0.1", features = ["full"] }
 ```
 
-The default features are `derive` and `config`.
+The default features are `derive`, `config`, and `toml`. `config` uses
+`serde_core`/`serde_json`; YAML and `clap_complete` are not default costs.
 
 ## Help and completion
 
@@ -191,3 +202,9 @@ The default features are `derive` and `config`.
 `--generate-completion SHELL`.
 
 Supported completion shells are bash, elvish, fish, PowerShell, and zsh.
+Actual completion generation requires the `completion` Cargo feature. Without
+it, an enabled `--generate-completion` option and the direct
+`try_completion_script(...)` API report that the feature is required. The
+`completion_script(...)` convenience wrapper panics on that error. Keeping the
+methods present in every feature tier ensures proc-macro expansions do not
+depend on Cargo features of the downstream crate.

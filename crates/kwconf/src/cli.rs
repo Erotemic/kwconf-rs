@@ -6,7 +6,7 @@
 
 use crate::command::{
     build_config_model, build_modal_model, extract, map_clap_error, normalize_argv,
-    render_completion, render_help, render_subcommand_help,
+    completion_request, render_help, render_subcommand_help,
 };
 use crate::spec::{
     dotted_name, key_eq, FieldPath, ModalSpec, ModalVariantInfo,
@@ -44,11 +44,7 @@ where
         return Err(Error::HelpRequested(render_help(&mut model.command, color)));
     }
     if let Some(shell) = parsed.completion {
-        return Err(Error::CompletionRequested(render_completion(
-            model.command,
-            shell,
-            spec.name,
-        )));
+        return Err(completion_request(model.command, shell, spec.name));
     }
 
     let mut value = T::default();
@@ -189,11 +185,7 @@ where
         return Err(Error::HelpRequested(render_help(&mut model.command, color)));
     }
     if let Some(shell) = root.completion {
-        return Err(Error::CompletionRequested(render_completion(
-            model.command,
-            shell,
-            spec.name,
-        )));
+        return Err(completion_request(model.command, shell, spec.name));
     }
 
     let subcommand = matches.subcommand();
@@ -236,11 +228,11 @@ where
     }
     if let Some(shell) = child.completion {
         let child_model = build_config_model(variant.info.spec, variant.info.name)?;
-        return Err(Error::CompletionRequested(render_completion(
+        return Err(completion_request(
             child_model.command,
             shell,
             variant.info.name,
-        )));
+        ));
     }
 
     Ok(ModalCliSelection {

@@ -10,28 +10,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo check -p kwconf --lib --no-default-features
-      - run: cargo check -p kwconf --lib --no-default-features --features derive
-      - run: cargo check -p kwconf --example cli --no-default-features --features derive
-      - name: Verify lightweight dependency tiers
-        shell: bash
+
+      - name: Clippy (all features)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Clippy (minimal runtime)
+        run: cargo clippy -p kwconf --lib --no-default-features -- -D warnings
+      - name: Clippy (Serde-free derive CLI)
+        run: cargo clippy -p kwconf --example cli --no-default-features --features derive -- -D warnings
+
+      - name: Check feature tiers
         run: |
-          if cargo tree -p kwconf --no-default-features -e normal | grep -Eq 'kwconf_derive|serde|syn v|quote v|proc-macro2 v'; then
-            echo "no-default-features unexpectedly contains Serde or proc-macro infrastructure"
-            exit 1
-          fi
-          if cargo tree -p kwconf --no-default-features --features derive -e normal | grep -Eq 'serde'; then
-            echo "derive-only unexpectedly contains Serde"
-            exit 1
-          fi
-          if cargo tree -p kwconf -e normal | grep -Eq 'serde_derive'; then
-            echo "the full runtime unexpectedly enables serde_derive"
-            exit 1
-          fi
-      - run: cargo test --workspace
-      - run: cargo doc --workspace --no-deps
+          cargo check -p kwconf --lib --no-default-features
+          cargo check -p kwconf --lib --no-default-features --features derive
+          cargo check -p kwconf --example cli --no-default-features --features derive
+          cargo check -p kwconf --lib --no-default-features --features completion
+          cargo test -p kwconf --lib --no-default-features --features config
+          cargo test -p kwconf --lib --no-default-features --features config,toml
+          cargo test -p kwconf --lib --no-default-features --features config,yaml
+
+      - name: Verify dependency tiers
+        run: scripts/check-dependency-tiers.sh
+
+      - name: Test default features
+        run: cargo test --workspace
+      - name: Test all features
+        run: cargo test --workspace --all-features
+
+      - name: Rustdoc
+        run: cargo doc --workspace --all-features --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -42,12 +50,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.85"
-      - run: cargo build --workspace --all-targets
-      - run: cargo test --workspace
+      - run: cargo build --workspace --all-targets --all-features
+      - run: cargo test --workspace --all-features
 
   package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Inspect package contents
+        shell: bash
+        run: |
+          for crate in kwconf_derive kwconf; do
+            listing="$(cargo package -p "$crate" --list)"
+            printf '%s\n' "$listing"
+            grep -qx 'LICENSE-APACHE' <<<"$listing"
+            grep -qx 'LICENSE-MIT' <<<"$listing"
+          done
       - run: cargo publish --workspace --dry-run

@@ -66,5 +66,8 @@ fn runtime_special_options_are_explicitly_opted_in() {
         ReservedEnabledConfig::from_iter(["reserved-enabled", "--generate-completion=bash"])
             .unwrap_err()
             .to_string();
+    #[cfg(feature = "completion")]
     assert!(completion.contains("reserved-enabled"));
+    #[cfg(not(feature = "completion"))]
+    assert!(completion.contains("requires Cargo feature `completion`"));
 }

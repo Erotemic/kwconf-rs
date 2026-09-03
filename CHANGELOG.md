@@ -21,6 +21,13 @@ First release.
 - One clap command model owns argv recognition, help, aliases, subcommands, and
   completions. Clap's derive feature is not enabled.
 - Removed the unnecessary Syn `extra-traits` feature.
+- Default features are now `derive + config + toml`: JSON/TOML layered config
+  remains the normal `kwconf = "0.1"` experience, while YAML and shell
+  completion generation are opt-in.
+- The runtime uses `serde_core` directly, depends on `clap_builder` rather than
+  clap's front crate, and builds TOML with parsing support only.
+- Added a `full` convenience feature plus docs.rs all-feature builds and CI
+  dependency-tier checks to keep lightweight configurations lightweight.
 
 ### Behavior
 
@@ -38,8 +45,8 @@ First release.
 - Only declared env bindings are read from the process, preventing unrelated
   non-Unicode environment entries from panicking parsing.
 - Config paths remain `PathBuf`s, including non-UTF-8 paths where supported.
-- Unknown config-file extensions report TOML, JSON, and YAML parse failures
-  together.
+- Unknown config-file extensions report failures from every config format
+  enabled in the build. Disabled TOML/YAML extensions report the feature needed.
 
 ### API
 
@@ -53,4 +60,7 @@ First release.
 - Derive metadata remains under `#[doc(hidden)] kwconf::__private`.
 - `Error` is `#[non_exhaustive]` and exposes the underlying I/O source.
 - Generic config structs and `#[kwconf(crate = "path")]` remain supported.
+- Completion helpers are present in every feature tier. `try_completion_script`
+  reports `Error::FeatureDisabled` when generation is unavailable, while
+  `completion_script` remains the infallible convenience wrapper.
 - Minimum supported Rust version is 1.85.

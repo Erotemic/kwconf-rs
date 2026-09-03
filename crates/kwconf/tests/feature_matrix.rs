@@ -103,6 +103,7 @@ fn defaults_are_deserializeable_and_nested_defaults_are_present() {
     assert_eq!(cfg.backend.batch_size, 32);
 }
 
+#[cfg(feature = "yaml")]
 #[test]
 fn source_precedence_is_defaults_config_env_then_argv_for_leaf_and_nested_values() {
     let path = temp_config(
@@ -211,6 +212,7 @@ batch_size = 999
     let _ = std::fs::remove_file(path);
 }
 
+#[cfg(feature = "yaml")]
 #[test]
 fn config_file_loader_accepts_toml_json_yaml_yml_and_extension_fallbacks() {
     let cases = [
@@ -293,6 +295,7 @@ fn auto_parser_accepts_scalar_json_array_json_object_and_null_string_sources() {
     assert_eq!(cfg.metadata, json!({"name": "demo", "ok": true}));
 }
 
+#[cfg(feature = "yaml")]
 #[test]
 fn csv_and_yaml_parsers_are_used_for_argv_and_env_string_sources() {
     let sources = kwconf::Sources::empty()
@@ -405,6 +408,7 @@ fn reserved_runtime_options_report_missing_or_invalid_values() {
     assert!(bad_color.to_string().contains("invalid color choice"));
 }
 
+#[cfg(feature = "completion")]
 #[test]
 fn help_and_completions_cover_runtime_flags_nested_fields_aliases_and_shells() {
     let help = FeatureMatrixConfig::help_with_color(kwconf::ColorChoice::Never);
@@ -436,6 +440,7 @@ fn help_and_completions_cover_runtime_flags_nested_fields_aliases_and_shells() {
     }
 }
 
+#[cfg(feature = "completion")]
 fn assert_completion_mentions_long_option(
     script: &str,
     shell: kwconf::CompletionShell,
@@ -453,4 +458,17 @@ fn assert_completion_mentions_long_option(
         found,
         "missing --{long_name} in {shell:?} completion script:\n{script}"
     );
+}
+
+#[cfg(not(feature = "completion"))]
+#[test]
+fn config_direct_completion_api_reports_disabled_feature() {
+    let err = FeatureMatrixConfig::try_completion_script(
+        kwconf::CompletionShell::Bash,
+        "feature-matrix",
+    )
+    .unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("requires Cargo feature `completion`"));
 }

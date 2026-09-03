@@ -5,6 +5,7 @@
 //! one interpretation of the CLI.
 
 use crate::error::{Error, Help, Result};
+use crate::CompletionShell;
 use crate::spec::{
     dotted_name, normalize_key, ConfigSpec, FieldInfo, FieldKind, FieldPath, ModalSpec,
     ModalVariantInfo, Namespace, Parser, SpecialOptions, ValueType,
@@ -14,7 +15,8 @@ use clap::builder::PossibleValuesParser;
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::parser::ValueSource;
 use clap::{Arg, ArgAction, ArgMatches, ColorChoice, Command};
-use clap_complete::aot::{generate, Shell};
+#[cfg(feature = "completion")]
+use clap_complete::aot::{generate, Shell as ClapShell};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -55,7 +57,7 @@ pub(crate) struct VariantModel {
 pub(crate) struct ParsedArgs {
     pub help: bool,
     pub color: Option<ColorChoice>,
-    pub completion: Option<Shell>,
+    pub completion: Option<CompletionShell>,
     pub config_path: Option<PathBuf>,
     /// Field assignments in argv order.
     pub values: Vec<(FieldPath, String)>,
@@ -115,7 +117,7 @@ fn add_special_options(
                 .value_name("PATH")
                 .action(ArgAction::Set)
                 .value_parser(clap::value_parser!(PathBuf))
-                .help("Read TOML, JSON, YAML, or YML config."),
+                .help("Read a config file (JSON; TOML/YAML when enabled)."),
         );
     }
     if options.completion {
@@ -125,13 +127,18 @@ fn add_special_options(
                 "the --generate-completion special option",
             )
             .map_err(schema)?;
+        let help = if cfg!(feature = "completion") {
+            "Generate a shell completion script."
+        } else {
+            "Generate a shell completion script (requires Cargo feature `completion`)."
+        };
         cmd = cmd.arg(
             Arg::new(COMPLETION_ID)
                 .long("generate-completion")
                 .value_name("SHELL")
                 .action(ArgAction::Set)
                 .value_parser(PossibleValuesParser::new(SHELL_NAMES))
-                .help("Generate a shell completion script."),
+                .help(help),
         );
     }
     if options.color {
@@ -403,13 +410,13 @@ pub(crate) fn normalize_argv(args: &[OsString], fallback_name: &str) -> Vec<OsSt
     out
 }
 
-pub(crate) fn parse_shell(text: &str) -> Result<Shell> {
+pub(crate) fn parse_shell(text: &str) -> Result<CompletionShell> {
     match text.to_ascii_lowercase().as_str() {
-        "bash" => Ok(Shell::Bash),
-        "elvish" => Ok(Shell::Elvish),
-        "fish" => Ok(Shell::Fish),
-        "powershell" | "power-shell" | "pwsh" => Ok(Shell::PowerShell),
-        "zsh" => Ok(Shell::Zsh),
+        "bash" => Ok(CompletionShell::Bash),
+        "elvish" => Ok(CompletionShell::Elvish),
+        "fish" => Ok(CompletionShell::Fish),
+        "powershell" | "power-shell" | "pwsh" => Ok(CompletionShell::PowerShell),
+        "zsh" => Ok(CompletionShell::Zsh),
         _ => Err(Error::InvalidCompletionShell(text.to_string())),
     }
 }
@@ -555,11 +562,45 @@ pub(crate) fn render_help(cmd: &mut Command, color: ColorChoice) -> Help {
     Help::new(&cmd.render_help(), color)
 }
 
-pub(crate) fn render_completion(mut cmd: Command, shell: Shell, bin_name: &str) -> String {
-    cmd.set_bin_name(bin_name.to_string());
-    let mut buf = Vec::new();
-    generate(shell, &mut cmd, bin_name.to_string(), &mut buf);
-    String::from_utf8(buf).expect("clap completion output is UTF-8")
+pub(crate) fn render_completion(
+    mut cmd: Command,
+    shell: CompletionShell,
+    bin_name: &str,
+) -> Result<String> {
+    #[cfg(feature = "completion")]
+    {
+        let shell = match shell {
+            CompletionShell::Bash => ClapShell::Bash,
+            CompletionShell::Elvish => ClapShell::Elvish,
+            CompletionShell::Fish => ClapShell::Fish,
+            CompletionShell::PowerShell => ClapShell::PowerShell,
+            CompletionShell::Zsh => ClapShell::Zsh,
+        };
+        cmd.set_bin_name(bin_name.to_string());
+        let mut buf = Vec::new();
+        generate(shell, &mut cmd, bin_name.to_string(), &mut buf);
+        return Ok(String::from_utf8(buf).expect("clap completion output is UTF-8"));
+    }
+
+    #[cfg(not(feature = "completion"))]
+    {
+        let _ = (&mut cmd, shell, bin_name);
+        Err(Error::FeatureDisabled {
+            feature: "completion",
+            capability: "shell completion generation",
+        })
+    }
+}
+
+pub(crate) fn completion_request(
+    cmd: Command,
+    shell: CompletionShell,
+    bin_name: &str,
+) -> Error {
+    match render_completion(cmd, shell, bin_name) {
+        Ok(script) => Error::CompletionRequested(script),
+        Err(err) => err,
+    }
 }
 
 /// Render help for one subcommand of a built modal command.
@@ -596,8 +637,8 @@ mod tests {
 
     #[test]
     fn shell_and_color_parsers_accept_common_names() {
-        assert_eq!(parse_shell("bash").unwrap(), Shell::Bash);
-        assert_eq!(parse_shell("pwsh").unwrap(), Shell::PowerShell);
+        assert_eq!(parse_shell("bash").unwrap(), CompletionShell::Bash);
+        assert_eq!(parse_shell("pwsh").unwrap(), CompletionShell::PowerShell);
         assert!(matches!(
             parse_color_choice("auto").unwrap(),
             ColorChoice::Auto

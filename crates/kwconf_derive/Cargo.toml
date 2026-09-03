@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Derive macros for kwconf; use the kwconf crate instead of depending on this directly"
+readme = "../../README.md"
 keywords = ["cli", "config", "derive", "kwconf"]
 categories = ["command-line-interface", "config"]
 

@@ -27,7 +27,7 @@ where Python kwconf currently filters them.
 From the repo root:
 
 ```bash
-cargo build -p kwconf --example kwconf_rs_full_app
+cargo build -p kwconf --features full --example kwconf_rs_full_app
 ```
 
 Run the Rust test suite, including tests that exercise the same fixtures used by
@@ -35,8 +35,8 @@ this demo and tests that check the Rust help surface against the Python kwconf
 landmarks:
 
 ```bash
-cargo test -p kwconf --test full_parity_example
-cargo test -p kwconf --test reserved_options
+cargo test -p kwconf --features full --test full_parity_example
+cargo test -p kwconf --features full --test reserved_options
 ```
 
 ## Prepare the Python example
@@ -58,14 +58,14 @@ export PYTHONPATH="$HOME/code/kwconf:${PYTHONPATH}"
 
 ```bash
 python examples/parity_full/kwconf_app.py --help
-cargo run -p kwconf --example kwconf_rs_full_app -- --help
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- --help
 ```
 
 ## Compare train help
 
 ```bash
 python examples/parity_full/kwconf_app.py train --help
-cargo run -p kwconf --example kwconf_rs_full_app -- train --help
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- train --help
 ```
 
 Look for the same conceptual surfaces: nested `dataset.*`, `model.*`,
@@ -91,7 +91,7 @@ python examples/parity_full/kwconf_app.py train \
 ```
 
 ```bash
-cargo run -p kwconf --example kwconf_rs_full_app -- train \
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- train \
     --config examples/parity_full/train.yaml \
     --preset=debug \
     --optimizer.lr=0.02 \
@@ -146,7 +146,7 @@ python examples/parity_full/kwconf_app.py score \
 ```
 
 ```bash
-cargo run -p kwconf --example kwconf_rs_full_app -- score \
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- score \
     --config examples/parity_full/eval.yaml \
     --threshold=0.91 \
     --metrics=accuracy,f1,auc
@@ -161,7 +161,7 @@ python examples/parity_full/kwconf_app.py export \
 ```
 
 ```bash
-cargo run -p kwconf --example kwconf_rs_full_app -- export \
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- export \
     --config examples/parity_full/export.yaml \
     --opset=18
 ```
@@ -172,16 +172,16 @@ Python kwconf can delegate autocomplete to `argcomplete` when it is installed.
 The Rust example exposes completion generation through clap-compatible scripts:
 
 ```bash
-cargo run -p kwconf --example kwconf_rs_full_app -- --generate-completion bash > kwconf-parity.bash
-cargo run -p kwconf --example kwconf_rs_full_app -- --generate-completion zsh > _kwconf-parity
-cargo run -p kwconf --example kwconf_rs_full_app -- --generate-completion fish > kwconf-parity.fish
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- --generate-completion bash > kwconf-parity.bash
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- --generate-completion zsh > _kwconf-parity
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- --generate-completion fish > kwconf-parity.fish
 ```
 
 ## Force colored Rust help
 
 ```bash
-cargo run -p kwconf --example kwconf_rs_full_app -- --color always --help
-cargo run -p kwconf --example kwconf_rs_full_app -- train --color always --help
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- --color always --help
+cargo run -p kwconf --features full --example kwconf_rs_full_app -- train --color always --help
 ```
 
 The Python side uses rich argparse formatting when the optional Python extras are

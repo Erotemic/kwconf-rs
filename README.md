@@ -13,10 +13,10 @@ defaults < config file < env < argv
 The same definition can also be used as a lightweight CLI without config-file
 or environment support.
 
-`kwconf-rs` supports derived structs, TOML / JSON / YAML config files, explicit
-environment bindings, nested configs, modal subcommands, generated help,
-colored help via `clap`, shell completions via `clap_complete`, and the parser
-modes `auto`, `csv`, and `yaml`.
+`kwconf-rs` supports derived structs, TOML / JSON config files by default,
+optional YAML config files, explicit environment bindings, nested configs,
+modal subcommands, generated help, colored help via clap, optional shell
+completions, and the parser modes `auto`, `csv`, and optional `yaml`.
 
 ## Python kwconf to Rust
 
@@ -295,8 +295,9 @@ field.
 
 ### `yaml`
 
-`yaml` is available with full `Config`. Malformed YAML is an error, including
-for a `String` destination; it does not fall back to the original token.
+`yaml` is available with full `Config` when the `yaml` Cargo feature is
+enabled. Malformed YAML is an error, including for a `String` destination; it
+does not fall back to the original token.
 
 ## Boolean flags
 
@@ -329,25 +330,34 @@ Full `Config` can additionally opt into config-file loading:
 #[kwconf(special_options(config, color, generate_completion))]
 ```
 
-Generate shell completions with an enabled completion option:
+Generate shell completions with the `completion` Cargo feature and an enabled
+completion option:
 
 ```bash
-cargo run -p kwconf --example kwconf_rs_train -- \
+cargo run -p kwconf --features completion --example kwconf_rs_train -- \
     --generate-completion bash > train.bash
-cargo run -p kwconf --example kwconf_rs_train -- \
+cargo run -p kwconf --features completion --example kwconf_rs_train -- \
     --generate-completion zsh > _train
-cargo run -p kwconf --example kwconf_rs_train -- \
+cargo run -p kwconf --features completion --example kwconf_rs_train -- \
     --generate-completion fish > train.fish
 ```
+
+Without the feature, kwconf still recognizes an explicitly enabled
+`--generate-completion` option and reports that the `completion` feature is
+required. The direct `try_completion_script(...)` API returns the same error;
+`completion_script(...)` is the infallible convenience wrapper and therefore
+panics when generation is unavailable. This avoids pulling completion-generation
+code into ordinary builds while keeping derive-generated APIs feature-stable.
 
 `Cli` and `ModalCli` reject `special_options(config)` because they do not load
 config files.
 
 ## Config files and environment
 
-With the `config` feature, TOML, JSON, YAML, and YML files are supported.
-Unknown extensions are tried as TOML, JSON, and YAML, with all parser failures
-reported if none succeeds.
+With the `config` feature, JSON files are supported. The default feature set
+also enables TOML. YAML/YML support is opt-in with the `yaml` feature. Unknown
+extensions are tried against the config formats enabled in that build, with all
+parser failures reported if none succeeds.
 
 Only environment variables declared by the schema are queried, so an unrelated
 non-Unicode environment entry cannot crash argument parsing. `--config` paths
@@ -355,17 +365,31 @@ remain `PathBuf`s and may be non-UTF-8 on platforms that permit it.
 
 ## Features and dependencies
 
-The default feature set provides the full derived configuration API:
+The default feature set provides the package's normal layered-config experience
+without making every consumer compile every optional format/tool:
 
 ```toml
-kwconf = "0.1"
+kwconf = "0.1"  # derive + config + JSON + TOML
 ```
 
-The feature tiers are:
+Optional capabilities are explicit:
+
+```toml
+# YAML/YML config files and parser = "yaml"
+kwconf = { version = "0.1", features = ["yaml"] }
+
+# --generate-completion, try_completion_script(...), and completion_script(...)
+kwconf = { version = "0.1", features = ["completion"] }
+
+# Everything
+kwconf = { version = "0.1", features = ["full"] }
+```
+
+The build tiers are:
 
 ```text
 kwconf --no-default-features
-    clap runtime only
+    clap_builder runtime only
     no Serde
     no proc-macro dependency
 
@@ -377,12 +401,20 @@ kwconf --no-default-features --features derive
 kwconf (default features)
     + derive
     + layered config support
-    + Serde runtime / JSON / TOML / YAML
+    + serde_core / serde_json
+    + parse-only TOML
+    no YAML
+    no shell-completion generator
+
+kwconf --features full
+    + YAML
+    + shell-completion generation
 ```
 
-Clap's derive feature is not enabled underneath kwconf. The Python-like struct
-API therefore uses one kwconf proc-macro layer rather than stacking kwconf and
-clap derives.
+Kwconf depends directly on `clap_builder`; clap's derive feature is not enabled.
+The Python-like struct API therefore uses one kwconf proc-macro layer rather than
+stacking kwconf and clap derives. TOML is built with parsing support only, so
+ordinary kwconf users do not compile TOML's writer.
 
 The intended public surface is small:
 
@@ -398,5 +430,6 @@ Derive plumbing lives under `kwconf::__private` and is not stable API.
 
 `0.1.0` is the first release. The minimum supported Rust version is 1.85.
 See `docs/contract.md`, `docs/porting-from-kwconf.md`,
-`docs/side-by-side-parity-demo.md`, and `CHANGELOG.md` for the detailed
-behavioral contract, parity notes, and migration details.
+`docs/side-by-side-parity-demo.md`, `docs/release.md`, and `CHANGELOG.md` for
+the detailed behavioral contract, parity notes, migration details, and release
+build-cost gates.

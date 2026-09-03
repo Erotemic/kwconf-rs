@@ -10,17 +10,27 @@ readme = "../../README.md"
 keywords = ["cli", "config", "clap", "derive", "kwconf"]
 categories = ["command-line-interface", "config"]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
-default = ["derive", "config"]
+# `kwconf = "0.1"` retains the package's core identity: derive a typed config
+# with JSON/TOML + env + argv layering. YAML and completion generation are
+# useful extensions, but not costs every downstream build should pay.
+default = ["derive", "config", "toml"]
 derive = ["dep:kwconf_derive"]
-config = ["dep:serde", "dep:serde_json", "dep:toml", "dep:yaml_serde"]
+config = ["dep:serde_core", "dep:serde_json"]
+toml = ["config", "dep:toml"]
+yaml = ["config", "dep:yaml_serde"]
+completion = ["dep:clap_complete"]
+full = ["derive", "config", "toml", "yaml", "completion"]
 
 [dependencies]
 kwconf_derive = { path = "../kwconf_derive", version = "0.1.0", optional = true }
-serde = { workspace = true, optional = true }
+serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 clap.workspace = true
-clap_complete.workspace = true
+clap_complete = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 yaml_serde = { workspace = true, optional = true }
 

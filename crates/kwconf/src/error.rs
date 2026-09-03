@@ -78,6 +78,11 @@ pub enum Error {
     HelpRequested(Help),
     /// `--generate-completion` was requested; the payload is the script.
     CompletionRequested(String),
+    /// A requested capability is behind an optional Cargo feature.
+    FeatureDisabled {
+        feature: &'static str,
+        capability: &'static str,
+    },
     /// A config file could not be read.
     Io {
         path: PathBuf,
@@ -123,6 +128,9 @@ impl fmt::Display for Error {
         match self {
             Error::HelpRequested(help) => f.write_str(help.text()),
             Error::CompletionRequested(script) => f.write_str(script),
+            Error::FeatureDisabled { feature, capability } => {
+                write!(f, "{capability} requires Cargo feature `{feature}`")
+            }
             Error::Io { path, source } => write!(f, "failed to read {}: {source}", path.display()),
             Error::ConfigFormat { path, message } => {
                 write!(f, "failed to parse {}: {message}", path.display())

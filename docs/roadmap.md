@@ -12,16 +12,19 @@
 - type-directed raw parsing for full `Config` and `FromStr` parsing for
   lightweight `Cli`.
 - nested subconfigs, modal commands, aliases, choices, strict bool negation,
-  TOML/JSON/YAML, env bindings, help color, and completions.
-- feature-matrix CI for no-default-features and derive-only builds.
+  JSON/TOML by default, optional YAML, env bindings, help color, and optional
+  shell-completion generation.
+- direct `clap_builder` use; no clap derive layer.
+- `serde_core` for the full-config trait surface and parse-only TOML.
+- feature-matrix CI for core, derive-only, default, and all-feature builds.
 
 ## Next useful work
 
 - snapshot tests for representative help/error output;
-- benchmark cold compile and CLI startup before optimizing metadata lookup;
-- decide whether config formats should become individually selectable features
-  (`toml`, `json`, `yaml`) after real consumers establish which combinations
-  are useful;
+- record cold compile timings for core, derive-only, default, and full builds
+  before optimizing metadata lookup;
+- use downstream reports and timings to decide whether JSON should also become
+  independently selectable;
 - add short options and positionals only where they map cleanly onto the config
   object model;
 - improve custom scalar parsing ergonomics for `Cli` beyond manual `FromStr` if

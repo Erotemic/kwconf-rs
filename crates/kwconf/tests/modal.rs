@@ -125,6 +125,7 @@ fn modal_env_and_argv_override_config() {
     let _ = std::fs::remove_file(path);
 }
 
+#[cfg(feature = "completion")]
 #[test]
 fn modal_help_completion_and_child_help_work() {
     let help = KwTool::help_with_color(kwconf::ColorChoice::Never);

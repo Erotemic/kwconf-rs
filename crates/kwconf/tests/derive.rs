@@ -158,6 +158,7 @@ fn nested_subconfig_merges_file_env_and_argv() {
     let _ = std::fs::remove_file(path);
 }
 
+#[cfg(feature = "completion")]
 #[test]
 fn nested_help_and_completion_include_dotted_fields() {
     let help = NestedConfig::help_with_color(kwconf::ColorChoice::Never);

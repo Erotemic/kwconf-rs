@@ -198,6 +198,7 @@ fn unit_enums_parse_from_bare_strings_and_respect_choices() {
     assert_eq!(cfg.mode, Mode::Safe);
 }
 
+#[cfg(feature = "yaml")]
 #[test]
 fn chars_yaml_and_any_values() {
     let cfg = parse([

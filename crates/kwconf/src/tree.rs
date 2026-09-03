@@ -6,8 +6,8 @@
 
 use crate::spec::Parser;
 use crate::{Error, Result};
-use serde::de::value::{SeqDeserializer, StringDeserializer};
-use serde::de::{
+use serde_core::de::value::{SeqDeserializer, StringDeserializer};
+use serde_core::de::{
     self, DeserializeOwned, DeserializeSeed, Deserializer, EnumAccess, IntoDeserializer,
     VariantAccess, Visitor,
 };
@@ -111,8 +111,20 @@ impl RawToken {
                     .map(|part| Value::String(part.to_string()))
                     .collect(),
             )),
-            Parser::Yaml => yaml_serde::from_str(&self.text)
-                .map_err(|err| self.fail(format!("invalid YAML: {err}"))),
+            Parser::Yaml => self.parse_yaml(),
+        }
+    }
+
+    fn parse_yaml(&self) -> std::result::Result<Value, DeError> {
+        #[cfg(feature = "yaml")]
+        {
+            return yaml_serde::from_str(&self.text)
+                .map_err(|err| self.fail(format!("invalid YAML: {err}")));
+        }
+
+        #[cfg(not(feature = "yaml"))]
+        {
+            Err(self.fail("YAML parsing requires Cargo feature `yaml`"))
         }
     }
 
@@ -548,10 +560,18 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "yaml")]
     #[test]
     fn malformed_yaml_never_falls_back_to_string() {
         assert!(parse::<String>("[broken", Parser::Yaml).is_err());
         assert_eq!(parse::<String>("'hello'", Parser::Yaml).unwrap(), "hello");
+    }
+
+    #[cfg(not(feature = "yaml"))]
+    #[test]
+    fn yaml_parser_reports_the_missing_feature() {
+        let err = parse::<String>("hello", Parser::Yaml).unwrap_err();
+        assert!(err.to_string().contains("Cargo feature `yaml`"));
     }
 
     #[test]
@@ -565,7 +585,10 @@ mod tests {
             Safe,
         }
         assert_eq!(parse::<Mode>("safe", Parser::Auto).unwrap(), Mode::Safe);
-        assert_eq!(parse::<Mode>("safe", Parser::Yaml).unwrap(), Mode::Safe);
-        assert!(parse::<Mode>("[broken", Parser::Yaml).is_err());
+        #[cfg(feature = "yaml")]
+        {
+            assert_eq!(parse::<Mode>("safe", Parser::Yaml).unwrap(), Mode::Safe);
+            assert!(parse::<Mode>("[broken", Parser::Yaml).is_err());
+        }
     }
 }

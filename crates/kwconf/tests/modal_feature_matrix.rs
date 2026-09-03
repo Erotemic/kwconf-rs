@@ -165,6 +165,7 @@ report = { source = 'alias-table' }
     let _ = std::fs::remove_file(path);
 }
 
+#[cfg(feature = "yaml")]
 #[test]
 fn modal_config_can_be_flat_for_the_selected_variant() {
     let path = temp_config(
@@ -260,6 +261,7 @@ threshold = 0.2
     let _ = std::fs::remove_file(path);
 }
 
+#[cfg(feature = "completion")]
 #[test]
 fn modal_help_color_completion_and_child_help_are_available() {
     let help = KwTool::help_with_color(kwconf::ColorChoice::Never);

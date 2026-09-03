@@ -95,7 +95,7 @@ bindings. Use `Sources` when tests or callers need an explicit config/env mix.
 | --- | --- | --- |
 | `auto` | `auto` | type-directed in `Config`, `FromStr` scalars in `Cli` |
 | `csv` | `csv` | typed `Vec<T>`; empty components are preserved in Rust |
-| `yaml` | `yaml` | full `Config` only |
+| `yaml` | `yaml` | full `Config` only; requires Cargo feature `yaml` |
 
 Python kwconf currently filters empty CSV components after trimming. Rust does
 not copy that behavior. For example:
@@ -196,7 +196,8 @@ not need to do so merely to participate in kwconf.
 train --color always --help
 ```
 
-`#[kwconf(special_options(generate_completion))]` enables:
+With Cargo feature `completion`, `#[kwconf(special_options(generate_completion))]`
+enables:
 
 ```bash
 train --generate-completion bash > train.bash
@@ -207,8 +208,11 @@ Only full `Config` / `ModalConfig` may enable `special_options(config)`.
 ## Dependency choices
 
 ```toml
-# Full layered configuration
+# Normal layered configuration: JSON + TOML
 kwconf = "0.1"
+
+# Add YAML and/or shell completion generation as needed
+kwconf = { version = "0.1", features = ["yaml", "completion"] }
 
 # Python-like argv-only API with no Serde
 kwconf = { version = "0.1", default-features = false, features = ["derive"] }

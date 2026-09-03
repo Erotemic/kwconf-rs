@@ -29,7 +29,18 @@ mod tree;
 use std::ffi::OsString;
 
 pub use clap::ColorChoice;
-pub use clap_complete::aot::Shell as CompletionShell;
+/// Shells supported by kwconf completion generation.
+///
+/// The enum lives in kwconf rather than `clap_complete`, so merely naming a
+/// completion shell does not pull the optional completion crate into builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionShell {
+    Bash,
+    Elvish,
+    Fish,
+    PowerShell,
+    Zsh,
+}
 pub use error::{Error, Help, Result};
 
 #[cfg(feature = "derive")]
@@ -57,7 +68,7 @@ pub mod __private {
     #[cfg(feature = "config")]
     pub use crate::tree::{parse_config_raw, parse_config_value};
     #[cfg(feature = "config")]
-    pub use serde;
+    pub use serde_core as serde;
     #[cfg(feature = "config")]
     pub use serde_json;
 }
@@ -121,15 +132,25 @@ pub trait Cli: Default + Sized {
         command::render_help(&mut model.command, color).to_string()
     }
 
+    /// Try to generate a shell completion script.
+    ///
+    /// Returns [`Error::FeatureDisabled`] when kwconf was built without the
+    /// `completion` Cargo feature.
+    fn try_completion_script(shell: CompletionShell, bin_name: &str) -> Result<String> {
+        let spec = Self::cli_spec();
+        let model = command::build_config_model(spec, spec.name)?;
+        command::render_completion(model.command, shell, bin_name)
+    }
+
     /// Generate a shell completion script.
     ///
     /// # Panics
     ///
-    /// Panics if the derived schema is invalid.
+    /// Panics if the derived schema is invalid or kwconf was built without the
+    /// `completion` Cargo feature. Use [`Cli::try_completion_script`] when the
+    /// capability may be disabled.
     fn completion_script(shell: CompletionShell, bin_name: &str) -> String {
-        let spec = Self::cli_spec();
-        let model = command::build_config_model(spec, spec.name).unwrap_or_else(schema_panic);
-        command::render_completion(model.command, shell, bin_name)
+        Self::try_completion_script(shell, bin_name).unwrap_or_else(schema_panic)
     }
 }
 
@@ -167,10 +188,24 @@ pub trait ModalCli: Sized {
         command::render_help(&mut model.command, color).to_string()
     }
 
-    /// Generate a shell completion script.
-    fn completion_script(shell: CompletionShell, bin_name: &str) -> String {
-        let model = command::build_modal_model(Self::modal_cli_spec()).unwrap_or_else(schema_panic);
+    /// Try to generate a shell completion script.
+    ///
+    /// Returns [`Error::FeatureDisabled`] when kwconf was built without the
+    /// `completion` Cargo feature.
+    fn try_completion_script(shell: CompletionShell, bin_name: &str) -> Result<String> {
+        let model = command::build_modal_model(Self::modal_cli_spec())?;
         command::render_completion(model.command, shell, bin_name)
+    }
+
+    /// Generate a shell completion script.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the derived schema is invalid or kwconf was built without the
+    /// `completion` Cargo feature. Use [`ModalCli::try_completion_script`] when
+    /// the capability may be disabled.
+    fn completion_script(shell: CompletionShell, bin_name: &str) -> String {
+        Self::try_completion_script(shell, bin_name).unwrap_or_else(schema_panic)
     }
 }
 
@@ -245,11 +280,25 @@ pub trait Config: Default + Sized {
         command::render_help(&mut model.command, color).to_string()
     }
 
-    /// Generate a shell completion script.
-    fn completion_script(shell: CompletionShell, bin_name: &str) -> String {
+    /// Try to generate a shell completion script.
+    ///
+    /// Returns [`Error::FeatureDisabled`] when kwconf was built without the
+    /// `completion` Cargo feature.
+    fn try_completion_script(shell: CompletionShell, bin_name: &str) -> Result<String> {
         let spec = Self::config_spec();
-        let model = command::build_config_model(spec, spec.name).unwrap_or_else(schema_panic);
+        let model = command::build_config_model(spec, spec.name)?;
         command::render_completion(model.command, shell, bin_name)
+    }
+
+    /// Generate a shell completion script.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the derived schema is invalid or kwconf was built without the
+    /// `completion` Cargo feature. Use [`Config::try_completion_script`] when
+    /// the capability may be disabled.
+    fn completion_script(shell: CompletionShell, bin_name: &str) -> String {
+        Self::try_completion_script(shell, bin_name).unwrap_or_else(schema_panic)
     }
 }
 
@@ -294,10 +343,24 @@ pub trait ModalConfig: Sized {
         command::render_help(&mut model.command, color).to_string()
     }
 
-    /// Generate a shell completion script.
-    fn completion_script(shell: CompletionShell, bin_name: &str) -> String {
-        let model = command::build_modal_model(Self::modal_spec()).unwrap_or_else(schema_panic);
+    /// Try to generate a shell completion script.
+    ///
+    /// Returns [`Error::FeatureDisabled`] when kwconf was built without the
+    /// `completion` Cargo feature.
+    fn try_completion_script(shell: CompletionShell, bin_name: &str) -> Result<String> {
+        let model = command::build_modal_model(Self::modal_spec())?;
         command::render_completion(model.command, shell, bin_name)
+    }
+
+    /// Generate a shell completion script.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the derived schema is invalid or kwconf was built without the
+    /// `completion` Cargo feature. Use [`ModalConfig::try_completion_script`]
+    /// when the capability may be disabled.
+    fn completion_script(shell: CompletionShell, bin_name: &str) -> String {
+        Self::try_completion_script(shell, bin_name).unwrap_or_else(schema_panic)
     }
 }
 

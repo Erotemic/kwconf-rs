@@ -124,6 +124,7 @@ fn help_lists_the_negation_flag_once_and_a_bool_takes_an_optional_value() {
     assert_eq!(cfg.long_name, "z");
 }
 
+#[cfg(feature = "completion")]
 #[test]
 fn completion_scripts_come_from_the_same_model() {
     let bash = Outer::completion_script(kwconf::CompletionShell::Bash, "outer");

@@ -5,7 +5,7 @@
 
 use crate::command::{
     build_config_model, build_modal_model, extract, map_clap_error, normalize_argv,
-    render_completion, render_help, render_subcommand_help,
+    completion_request, render_help, render_subcommand_help,
 };
 use crate::error::{Error, Result};
 use crate::spec::{
@@ -37,11 +37,7 @@ pub(crate) fn resolve_config<T: Config>(mut sources: Sources) -> Result<T> {
         return Err(Error::HelpRequested(render_help(&mut model.command, color)));
     }
     if let Some(shell) = parsed.completion {
-        return Err(Error::CompletionRequested(render_completion(
-            model.command,
-            shell,
-            spec.name,
-        )));
+        return Err(completion_request(model.command, shell, spec.name));
     }
 
     let mut layers = Vec::new();
@@ -216,32 +212,68 @@ pub(crate) fn read_config_file(path: &Path) -> Result<Value> {
         .unwrap_or_default()
         .to_ascii_lowercase();
     match ext.as_str() {
+        "json" => parse_json(&text).map_err(format_error),
         "toml" => parse_toml(&text).map_err(format_error),
-        "json" => serde_json::from_str(&text).map_err(|err| format_error(err.to_string())),
-        "yaml" | "yml" => yaml_serde::from_str(&text).map_err(|err| format_error(err.to_string())),
-        _ => {
-            let toml_err = match parse_toml(&text) {
-                Ok(value) => return Ok(value),
-                Err(err) => err,
-            };
-            let json_err = match serde_json::from_str::<Value>(&text) {
-                Ok(value) => return Ok(value),
-                Err(err) => err.to_string(),
-            };
-            let yaml_err = match yaml_serde::from_str::<Value>(&text) {
-                Ok(value) => return Ok(value),
-                Err(err) => err.to_string(),
-            };
-            Err(format_error(format!(
-                "not valid TOML ({toml_err}), JSON ({json_err}), or YAML ({yaml_err})"
-            )))
-        }
+        "yaml" | "yml" => parse_yaml(&text).map_err(format_error),
+        _ => parse_unknown_extension(&text).map_err(format_error),
     }
 }
 
+fn parse_json(text: &str) -> std::result::Result<Value, String> {
+    serde_json::from_str(text).map_err(|err| err.to_string())
+}
+
 fn parse_toml(text: &str) -> std::result::Result<Value, String> {
-    let value: toml::Value = toml::from_str(text).map_err(|err| err.to_string())?;
-    serde_json::to_value(value).map_err(|err| err.to_string())
+    #[cfg(feature = "toml")]
+    {
+        let value: toml::Value = toml::from_str(text).map_err(|err| err.to_string())?;
+        return serde_json::to_value(value).map_err(|err| err.to_string());
+    }
+
+    #[cfg(not(feature = "toml"))]
+    {
+        let _ = text;
+        Err("TOML support requires Cargo feature `toml`".to_string())
+    }
+}
+
+fn parse_yaml(text: &str) -> std::result::Result<Value, String> {
+    #[cfg(feature = "yaml")]
+    {
+        return yaml_serde::from_str(text).map_err(|err| err.to_string());
+    }
+
+    #[cfg(not(feature = "yaml"))]
+    {
+        let _ = text;
+        Err("YAML support requires Cargo feature `yaml`".to_string())
+    }
+}
+
+fn parse_unknown_extension(text: &str) -> std::result::Result<Value, String> {
+    let mut errors = Vec::new();
+
+    #[cfg(feature = "toml")]
+    match parse_toml(text) {
+        Ok(value) => return Ok(value),
+        Err(err) => errors.push(format!("TOML ({err})")),
+    }
+
+    match parse_json(text) {
+        Ok(value) => return Ok(value),
+        Err(err) => errors.push(format!("JSON ({err})")),
+    }
+
+    #[cfg(feature = "yaml")]
+    match parse_yaml(text) {
+        Ok(value) => return Ok(value),
+        Err(err) => errors.push(format!("YAML ({err})")),
+    }
+
+    Err(format!(
+        "not valid in any enabled config format: {}",
+        errors.join("; ")
+    ))
 }
 
 /// Resolved modal selection handed to derive-generated code.
@@ -283,11 +315,7 @@ pub fn resolve_modal_selection(
         return Err(Error::HelpRequested(render_help(&mut model.command, color)));
     }
     if let Some(shell) = root.completion {
-        return Err(Error::CompletionRequested(render_completion(
-            model.command,
-            shell,
-            spec.name,
-        )));
+        return Err(completion_request(model.command, shell, spec.name));
     }
 
     let (config_value, config_source) = if let Some(value) = sources.take_config_value() {
@@ -339,11 +367,11 @@ pub fn resolve_modal_selection(
     }
     if let Some(shell) = child.completion {
         let child_model = build_config_model(variant.info.spec, variant.info.name)?;
-        return Err(Error::CompletionRequested(render_completion(
+        return Err(completion_request(
             child_model.command,
             shell,
             variant.info.name,
-        )));
+        ));
     }
 
     let mut layers = Vec::new();
@@ -422,5 +450,44 @@ fn modal_child_config_value(
         None
     } else {
         Some(Value::Object(remaining))
+    }
+}
+
+#[cfg(test)]
+mod format_feature_tests {
+    use super::*;
+
+    #[test]
+    fn json_is_part_of_the_base_config_feature() {
+        let value = parse_json(r#"{"answer": 42}"#).unwrap();
+        assert_eq!(value["answer"], 42);
+    }
+
+    #[cfg(feature = "toml")]
+    #[test]
+    fn toml_parser_is_available_when_enabled() {
+        let value = parse_toml("answer = 42").unwrap();
+        assert_eq!(value["answer"], 42);
+    }
+
+    #[cfg(not(feature = "toml"))]
+    #[test]
+    fn toml_parser_reports_the_missing_feature() {
+        let err = parse_toml("answer = 42").unwrap_err();
+        assert!(err.contains("Cargo feature `toml`"));
+    }
+
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn yaml_parser_is_available_when_enabled() {
+        let value = parse_yaml("answer: 42").unwrap();
+        assert_eq!(value["answer"], 42);
+    }
+
+    #[cfg(not(feature = "yaml"))]
+    #[test]
+    fn yaml_parser_reports_the_missing_feature() {
+        let err = parse_yaml("answer: 42").unwrap_err();
+        assert!(err.contains("Cargo feature `yaml`"));
     }
 }

@@ -71,6 +71,7 @@ fn env_sits_between_config_and_argv() {
     assert_eq!(cfg.width, 512);
 }
 
+#[cfg(feature = "completion")]
 #[test]
 fn generated_help_and_completion_cover_demo_fields() {
     let help = TrainConfig::help_with_color(kwconf::ColorChoice::Never);
@@ -111,6 +112,7 @@ fn color_never_help_is_plain_text() {
     assert!(help.contains("--color"));
 }
 
+#[cfg(feature = "completion")]
 #[test]
 fn cli_completion_request_returns_script() {
     let err = TrainConfig::from_iter(["train", "--generate-completion", "bash"]).unwrap_err();

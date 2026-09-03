@@ -90,3 +90,12 @@ fn modal_cli_uses_clap_subcommands_without_config_or_serde() {
         other => panic!("expected eval alias, got {other:?}"),
     }
 }
+
+#[cfg(not(feature = "completion"))]
+#[test]
+fn direct_completion_api_reports_disabled_feature() {
+    let err = TrainCli::try_completion_script(kwconf::CompletionShell::Bash, "train").unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("requires Cargo feature `completion`"));
+}

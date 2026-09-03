@@ -448,6 +448,10 @@ fn expand_struct(
                         <Self as #krate::Config>::help_with_color(color)
                     }
 
+                    pub fn try_completion_script(shell: #krate::CompletionShell, bin_name: &str) -> #krate::Result<::std::string::String> {
+                        <Self as #krate::Config>::try_completion_script(shell, bin_name)
+                    }
+
                     pub fn completion_script(shell: #krate::CompletionShell, bin_name: &str) -> ::std::string::String {
                         <Self as #krate::Config>::completion_script(shell, bin_name)
                     }
@@ -509,6 +513,10 @@ fn expand_struct(
 
                     pub fn help_with_color(color: #krate::ColorChoice) -> ::std::string::String {
                         <Self as #krate::Cli>::help_with_color(color)
+                    }
+
+                    pub fn try_completion_script(shell: #krate::CompletionShell, bin_name: &str) -> #krate::Result<::std::string::String> {
+                        <Self as #krate::Cli>::try_completion_script(shell, bin_name)
                     }
 
                     pub fn completion_script(shell: #krate::CompletionShell, bin_name: &str) -> ::std::string::String {
@@ -687,6 +695,10 @@ fn expand_modal(input: DeriveInput, flavor: ModalFlavor) -> syn::Result<proc_mac
                     <Self as #krate::ModalConfig>::help_with_color(color)
                 }
 
+                pub fn try_completion_script(shell: #krate::CompletionShell, bin_name: &str) -> #krate::Result<::std::string::String> {
+                    <Self as #krate::ModalConfig>::try_completion_script(shell, bin_name)
+                }
+
                 pub fn completion_script(shell: #krate::CompletionShell, bin_name: &str) -> ::std::string::String {
                     <Self as #krate::ModalConfig>::completion_script(shell, bin_name)
                 }
@@ -736,6 +748,10 @@ fn expand_modal(input: DeriveInput, flavor: ModalFlavor) -> syn::Result<proc_mac
 
                 pub fn help_with_color(color: #krate::ColorChoice) -> ::std::string::String {
                     <Self as #krate::ModalCli>::help_with_color(color)
+                }
+
+                pub fn try_completion_script(shell: #krate::CompletionShell, bin_name: &str) -> #krate::Result<::std::string::String> {
+                    <Self as #krate::ModalCli>::try_completion_script(shell, bin_name)
                 }
 
                 pub fn completion_script(shell: #krate::CompletionShell, bin_name: &str) -> ::std::string::String {
